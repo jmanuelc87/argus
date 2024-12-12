@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "argus"
+version = "0.1.0"
+description = ""
+authors = ["Juan Manuel Carballo <jm.carb@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pyserial = "^3.5"
+numpy = "^1.18"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.4"
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s [%(levelname)5s] (%(filename)s:%(lineno)s) -- %(message)s "
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

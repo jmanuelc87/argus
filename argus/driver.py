@@ -50,7 +50,7 @@ class ArgusDriver:
             if report:
                 self.setup_receive_thread()
         except Exception as e:
-            self.__log.error(f"Error {e}")
+            self.__log.error(f"Error {e} -- {traceback.format_exc()}")
             exit(1)
 
         time.sleep(self.__delay)
@@ -96,12 +96,12 @@ class ArgusDriver:
 
     def __parse_data(self, function, ext_data):
         if function == self.__FUNC_REPORT_SPEED:
-            self.__vl = int(s.unpack('h', bytearray(ext_data[0:2]))[0]) / 1000.0
-            self.__vr = int(s.unpack('h', bytearray(ext_data[2:4]))[0]) / 1000.0
-            self.__v = int(s.unpack('h', bytearray(ext_data[4:6]))[0]) / 1000.0
-            self.__wz = int(s.unpack('h', bytearray(ext_data[6:8]))[0]) / 1000.0
-            self.__rpml = int(s.unpack('h', bytearray(ext_data[8:10]))[0]) / 1000.0
-            self.__rpmr = int(s.unpack('h', bytearray(ext_data[10:12]))[0]) / 1000.0
+            self.__vl = round(s.unpack('f', bytearray(ext_data[0:4]))[0], 3)
+            self.__vr = round(s.unpack('f', bytearray(ext_data[4:8]))[0], 3)
+            self.__v = round(s.unpack('f', bytearray(ext_data[8:12]))[0], 3)
+            self.__wz = round(s.unpack('f', bytearray(ext_data[12:16]))[0], 3)
+            self.__rpml = round(s.unpack('f', bytearray(ext_data[16:20]))[0], 3)
+            self.__rpmr = round(s.unpack('f', bytearray(ext_data[20:24]))[0], 3)
         
         elif function == self.__FUNC_REPORT_ENCODER:
             self.__encoder_m1 = s.unpack('i', bytearray(ext_data[0:4]))[0]

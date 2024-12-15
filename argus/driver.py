@@ -17,6 +17,8 @@ class ArgusDriver:
     __FUNC_REPORT_SPEED = 0x0A
     __FUNC_REPORT_ENCODER = 0x0D
     __FUNC_MOTOR = 0x10
+    __FUNC_UART_SERVO = 0x20
+    __FUNC_UART_SERVO_ID = 0x21
 
 
     def __init__(self, com="/dev/myserial", delay=.002, report=False):
@@ -67,6 +69,41 @@ class ArgusDriver:
             checksum = sum(cmd, self.__COMPLEMENT) & 0xFF
             cmd.append(checksum)
             self.__send_data(cmd)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+            
+    def set_arm_servo_id(self, servo_id):
+        try:
+            if servo_id < 1 or servo_id > 250:
+                return
+            
+            cmd = [self.__HEAD, self.__DEVICE_ID, 0x04, self.__FUNC_UART_SERVO_ID, int(servo_id)]
+            checksum = sum(cmd, self.__COMPLEMENT) & 0xff
+            cmd.append(checksum)
+            self.__send_data(cmd)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+            
+    def move_arm_servo(self, servo_id, pulse_value, runtime=500):
+        try:
+            if servo_id < 1 or pulse_value < 96 or pulse_value > 4000 or runtime < 0:
+                return
+            
+            if runtime > 2000:
+                runtime = 2000
+            if runtime < 0:
+                runtime = 0
+            
+            s_id = int(servo_id) & 0xff
+            value = bytearray(s.pack('h', int(pulse_value)))
+            r_time = bytearray(s.pack('h', int(runtime)))
+            
+            cmd = [self.__HEAD, self.__DEVICE_ID, 0x00, self.__FUNC_UART_SERVO, s_id, value[0], value[1], r_time[0], r_time[1]]
+            cmd[2] = len(cmd) - 1
+            checksum = sum(cmd, self.__COMPLEMENT) & 0xff
+            cmd.append(checksum)
+            self.__send_data(cmd)
+            time.sleep(self.__delay)
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 

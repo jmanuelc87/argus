@@ -67,7 +67,7 @@ def test_set_car_motion_with_pos_neg_feedback():
 
 def test_set_car_motion_with_feedback():
     driver = ArgusDriver(com='COM6', report=True)
-    driver.set_motor_speed(0, 45, 0, 0)
+    driver.set_motor_speed(0, 100, 0, 0)
     
     for _ in range(10):
         time.sleep(1)
@@ -78,3 +78,13 @@ def test_set_car_motion_with_feedback():
         log.info(f"m2={enc[1]}, m4={enc[3]}")
         
     driver.set_motor_speed(0, 0, 0, 0)
+
+
+def test_move_arm_servo():
+    driver = ArgusDriver(com='COM6')
+    driver.move_arm_servo(3, 1000)
+
+
+def test_set_id_servo():
+    driver = ArgusDriver(com='COM6')
+    driver.set_arm_servo_id(3)

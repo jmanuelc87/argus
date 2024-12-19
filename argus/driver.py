@@ -39,11 +39,6 @@ class ArgusDriver:
             self.__v = 0.0
             self.__wz = 0.0
             
-            self.__err_m1 = 0
-            self.__err_m2 = 0
-            self.__err_m3 = 0
-            self.__err_m4 = 0
-            
             if self.conn.isOpen():
                 self.__log.info(f"open serial with {com}")
             else:
@@ -71,7 +66,7 @@ class ArgusDriver:
             self.__send_data(cmd)
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
-            
+
     def set_arm_servo_id(self, servo_id):
         try:
             if servo_id < 1 or servo_id > 250:
@@ -83,7 +78,7 @@ class ArgusDriver:
             self.__send_data(cmd)
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
-            
+
     def move_arm_servo(self, servo_id, pulse_value, runtime=500):
         try:
             if servo_id < 1 or pulse_value < 96 or pulse_value > 4000 or runtime < 0:
@@ -114,10 +109,6 @@ class ArgusDriver:
     def get_motion_data(self):
         vl, vr, v, wz, rpml, rpmr = self.__vl, self.__vr, self.__v, self.__wz, self.__rpml, self.__rpmr
         return vl, vr, v, wz, rpml, rpmr
-    
-    def get_pid_data(self):
-        err1, err2, err3, err4 = self.__err_m1, self.__err_m2, self.__err_m3, self.__err_m4
-        return err1, err2, err3, err4
 
     def __limit_motor_value(self, value):
         if value > 100:

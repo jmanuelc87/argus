@@ -2,6 +2,8 @@ import time
 import pytest
 import logging
 
+import pandas as pd
+
 from argus.driver import ArgusDriver
 
 
@@ -16,24 +18,6 @@ def test_set_motor_speed():
 def test_set_car_motion():
     driver = ArgusDriver(com='COM6')
     driver.set_car_motion(0.3, 0.3)
-
-
-def test_set_pid_param():
-    driver = ArgusDriver(com='COM6')
-    
-    kp = 0.8
-    ki = 0.06
-    kd = 0.5
-    
-    driver.set_pid_param(kp, ki, kd)
-    driver.set_car_motion(v_l=0.1, v_r=0.1)
-    time.sleep(1)
-    for _ in range(10):
-        vel = driver.get_motion_data()
-        log.info(f"vel: {vel}")
-        time.sleep(0.25)
-    time.sleep(3)
-    driver.set_car_motion(0, 0)
 
 
 def test_set_car_motion_with_pos_neg_feedback():
@@ -88,3 +72,27 @@ def test_move_arm_servo():
 def test_set_id_servo():
     driver = ArgusDriver(com='COM6')
     driver.set_arm_servo_id(3)
+
+
+def test_linear_interpolation_motors():
+    driver = ArgusDriver(com='COM6', report=True)
+
+    motion_data = []
+
+    for i in range(-100, 0, 5):
+        driver.set_motor_speed(0, i, 0, i)
+        time.sleep(3)
+        vel = driver.get_motion_data()
+        motion_data.append(list(vel) + [i])
+
+    for i in range(0, 105, 5):
+        driver.set_motor_speed(0, i, 0, i)
+        time.sleep(3)
+        vel = driver.get_motion_data()
+        motion_data.append(list(vel) + [i])
+
+    driver.set_motor_speed(0,0,0,0)
+
+    datadf = pd.DataFrame(data=motion_data, columns=['vl', 'vr', 'v', 'wz', 'rpm_l', 'rpm_r', 'pwm'])
+    datadf.to_csv("linear_interpolation_motor.csv")
+    

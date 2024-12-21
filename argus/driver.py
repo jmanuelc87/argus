@@ -17,6 +17,8 @@ class ArgusDriver:
     __FUNC_REPORT_SPEED = 0x0A
     __FUNC_REPORT_ENCODER = 0x0D
     __FUNC_MOTOR = 0x10
+    __FUNC_MOTION = 0x12
+    __FUNC_SET_MOTOR_PID = 0x13
     __FUNC_UART_SERVO = 0x20
     __FUNC_UART_SERVO_ID = 0x21
 
@@ -60,6 +62,19 @@ class ArgusDriver:
             d = bytearray(s.pack('b', self.__limit_motor_value(speed4)))
             
             cmd = [self.__HEAD, self.__DEVICE_ID, 0x00, self.__FUNC_MOTOR, a[0], b[0], c[0], d[0]]
+            cmd[2] = len(cmd) - 2
+            checksum = sum(cmd, self.__COMPLEMENT) & 0xFF
+            cmd.append(checksum)
+            self.__send_data(cmd)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+
+    def set_motion_speed(self, v_l: float, v_r: float):
+        try:
+            a = bytearray(s.pack('f', v_l))
+            b = bytearray(s.pack('f', v_r))
+            
+            cmd = [self.__HEAD, self.__DEVICE_ID, 0x00, self.__FUNC_MOTION, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]]
             cmd[2] = len(cmd) - 2
             checksum = sum(cmd, self.__COMPLEMENT) & 0xFF
             cmd.append(checksum)

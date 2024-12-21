@@ -51,7 +51,7 @@ def test_set_car_motion_with_pos_neg_feedback():
 
 def test_set_car_motion_with_feedback():
     driver = ArgusDriver(com='COM6', report=True)
-    driver.set_motor_speed(0, 100, 0, 0)
+    driver.set_motor_speed(0, 20, 0, 0)
     
     for _ in range(10):
         time.sleep(1)
@@ -96,3 +96,15 @@ def test_linear_interpolation_motors():
     datadf = pd.DataFrame(data=motion_data, columns=['vl', 'vr', 'v', 'wz', 'rpm_l', 'rpm_r', 'pwm'])
     datadf.to_csv("linear_interpolation_motor.csv")
     
+
+def test_set_motion_speed():
+    driver = ArgusDriver(com='COM6', report=True)
+    
+    driver.set_motion_speed(0.150, 0.150)
+    
+    for _ in range(10):
+        time.sleep(1)
+        vel = driver.get_motion_data()
+        log.info(f"vl={vel[0]}, vr={vel[1]}, v={vel[2]}, wz={vel[3]}, rpm_l={vel[4]}, rpm_r={vel[5]}")
+    
+    driver.set_motion_speed(0.0, 0.0)

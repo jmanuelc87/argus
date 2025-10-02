@@ -24,7 +24,7 @@ class Driver:
             self.conn = serial.Serial(com, 115200)
             self.__delay = delay
 
-            if self.conn.isOpen():
+            if self.conn.is_open:
                 self.__log.info(f"open serial with {com}")
             else:
                 self.__log.info("serial open failed!")
@@ -72,6 +72,22 @@ class Driver:
                 pulse & 0xFF,
                 (time >> 8) & 0xFF,
                 time & 0xFF,
+            ]
+
+            crc = self.__crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+
+    def get_serial_servo_angle(self, servo_id: int):
+        try:
+            payload = [
+                0x06,
+                0x01,
+                servo_id & 0xFF,
             ]
 
             crc = self.__crc16_ccitt(payload)
@@ -141,7 +157,7 @@ class Driver:
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 
-    def __crc16_ccitt(self, data: bytes, crc: int = 0xFFFF) -> int:
+    def __crc16_ccitt(self, data, crc: int = 0xFFFF) -> int:
         """
         Compute CRC16-CCITT (polynomial 0x1021, initial value 0xFFFF).
         """

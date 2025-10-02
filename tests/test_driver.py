@@ -47,7 +47,7 @@ def test_set_motor_speed2():
 
 def test_move_serial_servo1():
     driver = Driver(report=True)
-    driver.move_serial_servo(1, 2000, 500)
+    driver.move_serial_servo(1, 100, 500)
 
     time.sleep(0.1)
 
@@ -67,5 +67,16 @@ def test_move_serial_servo2():
     msg = driver.get_latest_message()
 
     assert msg == "OK!"
+
+    log.info(msg)
+
+
+def test_get_serial_servo_angle():
+    driver = Driver(report=True)
+    driver.get_serial_servo_angle(1)
+
+    time.sleep(0.1)
+
+    msg = driver.get_latest_message()
 
     log.info(msg)

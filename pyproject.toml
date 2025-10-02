@@ -12,6 +12,9 @@ dependencies = [
 [tool.uv]
 package = true
 
+[project.scripts]
+ui = "argus.ui:main"
+
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "DEBUG"

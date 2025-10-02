@@ -16,7 +16,7 @@ class Driver:
 
     def __init__(
         self,
-        com="/dev/tty.usbserial-2130",
+        com,
         delay=0.002,
         report=False,
     ) -> None:
@@ -123,6 +123,8 @@ class Driver:
         self.conn.write(bytes(data))
 
     def close(self):
+        self.__running = False
+        time.sleep(0.1)
         self.conn.close()
         self.__log.info("bye bye!")
 
@@ -134,7 +136,11 @@ class Driver:
             self.__latest_message = "".join(chr(h) for h in ext_data)
 
     def __receive_data(self):
-        while True:
+        while self.__running:
+            if not self.conn.is_open:
+                time.sleep(1)
+                continue
+
             head = bytearray(self.conn.read())[0]
             if head == self.__HEAD:
                 type = bytearray(self.conn.read())[0]

@@ -32,9 +32,9 @@ def test_set_motor_speed1():
     log.info(msg)
 
 
-def test_set_motor_speed2():
+def test_motor_stop():
     driver = Driver(report=True)
-    driver.set_motor_speed(1, 0)
+    driver.motor_stop(1)
 
     time.sleep(0.5)
 
@@ -47,7 +47,7 @@ def test_set_motor_speed2():
 
 def test_move_serial_servo1():
     driver = Driver(report=True)
-    driver.move_serial_servo(1, 100, 500)
+    driver.move_serial_servo(1, 2000, 500)
 
     time.sleep(0.1)
 

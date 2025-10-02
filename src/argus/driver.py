@@ -62,6 +62,23 @@ class Driver:
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 
+    def motor_stop(self, motor_id: int):
+        try:
+            payload = [
+                0x03,
+                0x02,
+                motor_id & 0xFF,
+                0x00,
+            ]
+
+            crc = self.__crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+
     def move_serial_servo(self, servo_id: int, pulse: int, time: int):
         try:
             payload = [

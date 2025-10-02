@@ -18,3 +18,54 @@ def test_ping():
     assert msg == "OK!"
 
     log.info(msg)
+
+
+def test_set_motor_speed1():
+    driver = Driver(report=True)
+    driver.set_motor_speed(1, 2000)
+    time.sleep(0.5)
+
+    msg = driver.get_latest_message()
+
+    assert msg == "OK!"
+
+    log.info(msg)
+
+
+def test_set_motor_speed2():
+    driver = Driver(report=True)
+    driver.set_motor_speed(1, 0)
+
+    time.sleep(0.5)
+
+    msg = driver.get_latest_message()
+
+    assert msg == "OK!"
+
+    log.info(msg)
+
+
+def test_move_serial_servo1():
+    driver = Driver(report=True)
+    driver.move_serial_servo(1, 2000, 500)
+
+    time.sleep(0.1)
+
+    msg = driver.get_latest_message()
+
+    assert msg == "OK!"
+
+    log.info(msg)
+
+
+def test_move_serial_servo2():
+    driver = Driver(report=True)
+    driver.move_serial_servo(1, 3999, 500)
+
+    time.sleep(0.1)
+
+    msg = driver.get_latest_message()
+
+    assert msg == "OK!"
+
+    log.info(msg)

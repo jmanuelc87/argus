@@ -46,7 +46,39 @@ class Driver:
 
     def set_motor_speed(self, motor_id: int, speed: int):
         try:
-            pass
+            payload = [
+                0x02,
+                0x03,
+                motor_id & 0xFF,
+                (speed >> 8) & 0xFF,
+                speed & 0xFF,
+            ]
+
+            crc = self.__crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+
+    def move_serial_servo(self, servo_id: int, pulse: int, time: int):
+        try:
+            payload = [
+                0x05,
+                0x05,
+                servo_id & 0xFF,
+                (pulse >> 8) & 0xFF,
+                pulse & 0xFF,
+                (time >> 8) & 0xFF,
+                time & 0xFF,
+            ]
+
+            crc = self.__crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 
@@ -93,7 +125,7 @@ class Driver:
                     if crc == rx_crc:
                         self.__parse_data(type, payload)
             else:
-                time.sleep(0.01)
+                time.sleep(0.05)
 
     def setup_receive_thread(self):
         try:

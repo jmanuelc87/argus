@@ -1,7 +1,12 @@
+import logging
+
 import tkinter as tk
 from tkinter import ttk
 
 from argus.driver import Driver
+
+log = logging.getLogger(__file__)
+
 
 MIN_PULSE = 100
 MAX_PULSE = 3900
@@ -18,7 +23,6 @@ class ServoControllerFrame(ttk.Frame):
         self.send_on_change = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
 
-        # --- debounce support ---
         self._debounce_after_id = None
         self._debounce_idx = None
         self._debounce_value = None
@@ -126,22 +130,33 @@ class ServoControllerFrame(ttk.Frame):
         self.status_var.set(f"Printed values to console: {values}")
 
     def on_servo_change(self, servo_index: int, pulse: int):
+        global driver
         if driver:
             driver.move_serial_servo(servo_index, pulse, 500)
 
 
 class MotorControllerFrame(ttk.Frame):
-    """Motor controller for 4 motors with range -2000 to 2000 and accel/decel buttons."""
-
     def __init__(self, parent):
         super().__init__(parent, padding=12)
         self.status = tk.StringVar(value="Motor Controller Ready")
-        self.motors = []
+
+        import threading, time, queue
+
+        self._threading = threading
+        self._time = time
+        self._queue = queue
+
+        self.motors = []  # list of IntVar for Motor 1..4
+
+        self.poll_interval_ms = 500  # overall cadence per full cycle
+        self._poll_q = self._queue.Queue()  # data from worker -> UI
+        self._stop_ev = self._threading.Event()  # stop signal for worker thread
+        self._serial_lock = self._threading.Lock()  # guard serial I/O (reads & writes)
+        self._poll_thread = None
 
         lf = ttk.LabelFrame(self, text="Motor Controls")
         lf.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         self.columnconfigure(0, weight=1)
-        lf.columnconfigure(1, weight=1)
 
         for i in range(4):
             self._make_motor_row(lf, i + 1, row=i)
@@ -150,24 +165,27 @@ class MotorControllerFrame(ttk.Frame):
             row=1, column=0, sticky="ew", pady=(8, 0)
         )
 
+        # Start background worker and UI queue draining
+        self._poll_thread = self._threading.Thread(
+            target=self._poll_worker, daemon=True
+        )
+        self._poll_thread.start()
+        self.after(50, self._drain_poll_queue)
+
+        # Ensure clean stop when this frame is destroyed
+        self.bind("<Destroy>", self._on_destroy, add="+")
+
     def _make_motor_row(self, parent, idx: int, row: int):
         ttk.Label(parent, text=f"Motor {idx}:").grid(
             row=row, column=0, padx=6, pady=6, sticky="w"
         )
 
+        rpm_var = tk.DoubleVar(value=0.0)
         value_var = tk.IntVar(value=0)
-        scale = ttk.Scale(
-            parent,
-            from_=-2000,
-            to=2000,
-            orient="horizontal",
-            command=lambda v, i=idx, vv=value_var: self._on_speed_change(i, vv, v),
+        ttk.Label(parent, textvariable=rpm_var, width=8, anchor="e").grid(
+            row=row, column=1, padx=6
         )
-        scale.set(0)
-        scale.grid(row=row, column=1, padx=6, pady=6, sticky="ew")
-
-        val_label = ttk.Label(parent, textvariable=value_var, width=6, anchor="e")
-        val_label.grid(row=row, column=2, padx=6)
+        ttk.Label(parent, text="RPM").grid(row=row, column=2, padx=4)
 
         # Control buttons
         btns = ttk.Frame(parent)
@@ -188,34 +206,73 @@ class MotorControllerFrame(ttk.Frame):
             btns, text="Decel", command=lambda i=idx: self._adjust_speed(i, -100)
         ).pack(side="left", padx=2)
 
-        parent.columnconfigure(1, weight=1)
-        self.motors.append((scale, value_var))
+        self.motors.append((value_var, rpm_var))
 
     def _set_speed(self, motor_idx: int, value: int):
-        scale, value_var = self.motors[motor_idx - 1]
-        # Clamp to range -2000 to 2000
-        value = max(-2000, min(2000, value))
-        scale.set(value)
-        value_var.set(value)
-        if driver:
-            driver.set_motor_speed(motor_idx, value)
-            self.status.set(f"Motor {motor_idx} set to {value}")
+        value = max(-2000, min(2000, int(value)))
+        v, _ = self.motors[motor_idx - 1]
+        v.set(value)
+        self.status.set(f"Motor {motor_idx} set to {v.get()} RPM")
+        try:
+            with self._serial_lock:
+                driver.set_motor_speed(motor_idx, value)  # type: ignore
+        except Exception as e:
+            self.status.set(f"Set speed failed (M{motor_idx}): {e}")
 
     def _adjust_speed(self, motor_idx: int, delta: int):
-        """Increment or decrement motor speed by delta."""
-        scale, value_var = self.motors[motor_idx - 1]
-        current = int(float(scale.get()))
-        new_val = max(-2000, min(2000, current + delta))
-        scale.set(new_val)
-        value_var.set(new_val)
-        if driver:
-            driver.set_motor_speed(motor_idx, new_val)
-            self.status.set(f"Motor {motor_idx} adjusted to {new_val}")
+        cur, _ = self.motors[motor_idx - 1]
+        self._set_speed(motor_idx, cur.get() + int(delta))
 
-    def _on_speed_change(self, motor_idx: int, value_var: tk.IntVar, raw_value: str):
-        ivalue = int(float(raw_value))
-        value_var.set(ivalue)
-        self.status.set(f"Motor {motor_idx}: {ivalue}")
+    def _poll_worker(self):
+        """
+        Poll each motor in round-robin order.
+        Do ALL blocking serial I/O here; UI updates happen via queue -> after().
+        """
+        # per-motor stagger so a full cycle ~ poll_interval_ms
+        per_motor_sleep = max(0.0, self.poll_interval_ms / 1000.0 / 4.0)
+        while not self._stop_ev.is_set():
+            for idx in range(1, 5):  # motors 1..4
+                rpm = None
+                try:
+                    with self._serial_lock:
+                        rpm = self._safe_read_rpm(idx)
+                except Exception:
+                    rpm = None
+                # enqueue result for UI thread
+                self._poll_q.put((idx, rpm))
+                # small stagger between motors
+                if per_motor_sleep > 0:
+                    self._time.sleep(per_motor_sleep)
+
+    def _safe_read_rpm(self, motor_idx: int):
+        """
+        Replace with your real serial read.
+        Must be fast-ish or have an internal timeout.
+        Return int (RPM) or None if not available.
+        """
+        # Example placeholder: echo last known value so UI is stable without hardware.
+
+        driver.get_encoder_values(motor_idx - 1)  # type: ignore
+        last = driver.get_latest_message()  # type: ignore
+
+        return last if isinstance(last, float) else 0.0
+
+    def _drain_poll_queue(self):
+        try:
+            while True:
+                idx, rpm = self._poll_q.get_nowait()
+                if rpm is not None and 1 <= idx <= len(self.motors):
+                    rpm = float(max(-205, min(205, rpm)))
+                    self.motors[idx - 2][1].set(f"{rpm:0.2f}")
+        except self._queue.Empty:
+            pass
+        # re-arm if widget still exists
+        if self.winfo_exists() and not self._stop_ev.is_set():
+            self.after(50, self._drain_poll_queue)
+
+    def _on_destroy(self, _event=None):
+        # Signal worker to stop; thread is daemon so app exit is not blocked
+        self._stop_ev.set()
 
 
 class SettingsFrame(ttk.Frame):
@@ -258,16 +315,18 @@ class SettingsFrame(ttk.Frame):
         self.status_var.set(f"Connected to {port} (UI only).")
 
     def _on_disconnect(self):
+        global driver
         if driver:
             driver.close()
-        self.status_var.set("Disconnected (UI only).")
+            driver = None
+        self.status_var.set("Disconnected.")
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Transbot Control Panel")
-        self.geometry("960x380")
+        self.geometry("1020x380")
         self.resizable(False, False)
 
         style = ttk.Style(self)
@@ -291,8 +350,15 @@ class App(tk.Tk):
             anchor="w", pady=(0, 8)
         )
 
-        self.view_var = tk.StringVar(value="servo")
+        self.view_var = tk.StringVar(value="settings")
 
+        ttk.Radiobutton(
+            sidebar,
+            text="Settings",
+            value="settings",
+            variable=self.view_var,
+            command=self._switch_view,
+        ).pack(anchor="w", pady=4)
         ttk.Radiobutton(
             sidebar,
             text="Servo Controller",
@@ -304,13 +370,6 @@ class App(tk.Tk):
             sidebar,
             text="Motor Controller",
             value="motor",
-            variable=self.view_var,
-            command=self._switch_view,
-        ).pack(anchor="w", pady=4)
-        ttk.Radiobutton(
-            sidebar,
-            text="Settings",
-            value="settings",
             variable=self.view_var,
             command=self._switch_view,
         ).pack(anchor="w", pady=4)
@@ -337,7 +396,7 @@ class App(tk.Tk):
         self.motor_view = MotorControllerFrame(self.content)
 
         # Stack all views; raise the selected one
-        for f in (self.servo_view, self.motor_view, self.settings_view):
+        for f in (self.settings_view, self.servo_view, self.motor_view):
             f.grid(row=0, column=0, sticky="nsew")
 
         self._switch_view()  # show default
@@ -358,3 +417,7 @@ class App(tk.Tk):
 def main():
     app = App()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

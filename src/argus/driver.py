@@ -51,8 +51,8 @@ class Driver:
                 0x02,
                 0x03,
                 motor_id & 0xFF,
-                (speed >> 8) & 0xFF,
-                speed & 0xFF,
+                (int(speed) >> 8) & 0xFF,
+                int(speed) & 0xFF,
             ]
 
             crc = self.__crc16_ccitt(payload)
@@ -136,8 +136,12 @@ class Driver:
         return self.__latest_message
 
     def __send_data(self, data):
-        self.__log.debug(f"Data: {[hex(d) for d in data]}")
-        self.conn.write(bytes(data))
+        if self.conn.is_open:
+            try:
+                self.__log.debug(f"Data: {[hex(d) for d in data]}")
+                self.conn.write(bytes(data))
+            except Exception:
+                pass
 
     def close(self):
         self.__running = False
@@ -161,32 +165,34 @@ class Driver:
                 time.sleep(0.5)
                 continue
 
-            head = bytearray(self.conn.read())[0]
-            if head == self.__HEAD:
-                type = bytearray(self.conn.read())[0]
-                crc = 0
-                rx_crc = 0
-                if type in self.__MESSAGE:
-                    lenx = bytearray(self.conn.read())[0]
+            try:
+                head = bytearray(self.conn.read())[0]
+                if head == self.__HEAD:
+                    type = bytearray(self.conn.read())[0]
+                    crc = 0
+                    rx_crc = 0
+                    if type in self.__MESSAGE:
+                        lenx = bytearray(self.conn.read())[0]
 
-                    payload = []
+                        payload = []
 
-                    while len(payload) < lenx:
-                        value = bytearray(self.conn.read())[0]
-                        payload.append(value)
+                        while len(payload) < lenx:
+                            value = bytearray(self.conn.read())[0]
+                            payload.append(value)
 
-                    crc1 = bytearray(self.conn.read())[0]
-                    crc2 = bytearray(self.conn.read())[0]
+                        crc1 = bytearray(self.conn.read())[0]
+                        crc2 = bytearray(self.conn.read())[0]
 
-                    rx_crc = (crc1 << 8) | crc2
-                    crc = self.__crc16_ccitt([type, lenx, *payload])
+                        rx_crc = (crc1 << 8) | crc2
+                        crc = self.__crc16_ccitt([type, lenx, *payload])
 
-                    self.__log.debug(crc == rx_crc)
-                    if crc == rx_crc:
-                        self.__log.debug(payload)
-                        self.__parse_data(type, payload)
-            else:
-                time.sleep(0.05)
+                        if crc == rx_crc:
+                            self.__log.debug(payload)
+                            self.__parse_data(type, payload)
+                else:
+                    time.sleep(0.05)
+            except Exception:
+                pass
 
     def setup_receive_thread(self):
         try:

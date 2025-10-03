@@ -1,4 +1,5 @@
 import time
+import struct
 import serial
 import logging
 import traceback
@@ -10,7 +11,7 @@ class Driver:
     __running = False
     __HEAD = 0xAA
 
-    __MESSAGE = 0x01
+    __MESSAGE = [0x01, 0x02]
 
     __latest_message = ""
 
@@ -115,11 +116,27 @@ class Driver:
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 
+    def get_encoder_values(self, motor_id: int):
+        try:
+            payload = [
+                0x07,
+                0x01,
+                motor_id & 0xFF,
+            ]
+
+            crc = self.__crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
+
     def get_latest_message(self):
         return self.__latest_message
 
     def __send_data(self, data):
-        self.__log.debug(f"Data: {bytes(data)}")
+        self.__log.debug(f"Data: {[hex(d) for d in data]}")
         self.conn.write(bytes(data))
 
     def close(self):
@@ -132,13 +149,16 @@ class Driver:
         self.close()
 
     def __parse_data(self, function, ext_data):
-        if function == self.__MESSAGE:
+        if function == 0x01:
             self.__latest_message = "".join(chr(h) for h in ext_data)
+
+        if function == 0x02 and len(ext_data) == 4:
+            self.__latest_message = struct.unpack("<f", bytes(ext_data))[0]
 
     def __receive_data(self):
         while self.__running:
             if not self.conn.is_open:
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
 
             head = bytearray(self.conn.read())[0]
@@ -146,7 +166,7 @@ class Driver:
                 type = bytearray(self.conn.read())[0]
                 crc = 0
                 rx_crc = 0
-                if type == self.__MESSAGE:
+                if type in self.__MESSAGE:
                     lenx = bytearray(self.conn.read())[0]
 
                     payload = []
@@ -161,7 +181,9 @@ class Driver:
                     rx_crc = (crc1 << 8) | crc2
                     crc = self.__crc16_ccitt([type, lenx, *payload])
 
+                    self.__log.debug(crc == rx_crc)
                     if crc == rx_crc:
+                        self.__log.debug(payload)
                         self.__parse_data(type, payload)
             else:
                 time.sleep(0.05)
@@ -169,12 +191,12 @@ class Driver:
     def setup_receive_thread(self):
         try:
             if not self.__running:
+                self.__running = True
                 self.__receive_task = t.Thread(
                     target=self.__receive_data, name="receive_data_task"
                 )
                 self.__receive_task.daemon = True
                 self.__receive_task.start()
-                self.__running = True
                 self.__log.info("started `receive_data` thread!")
                 time.sleep(0.05)
         except Exception as e:

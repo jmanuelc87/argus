@@ -1,4 +1,7 @@
+import time
+import queue
 import logging
+import threading
 
 import tkinter as tk
 from tkinter import ttk
@@ -13,12 +16,10 @@ MAX_PULSE = 3900
 DEFAULT_PULSE = (MIN_PULSE + MAX_PULSE) // 2  # 2000
 
 
-driver = None
-
-
 class ServoControllerFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent, padding=12)
+        self.parent = parent
         self.scales = []
         self.send_on_change = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
@@ -26,6 +27,8 @@ class ServoControllerFrame(ttk.Frame):
         self._debounce_after_id = None
         self._debounce_idx = None
         self._debounce_value = None
+
+        self._serial_lock = self.parent._serial_lock
 
         # Create three servo rows
         for i in range(3):
@@ -104,8 +107,8 @@ class ServoControllerFrame(ttk.Frame):
             self._debounce_idx = idx
             self._debounce_value = ivalue
 
-            # schedule new callback after 300ms
-            self._debounce_after_id = self.after(500, self._debounced_callback)
+            # schedule new callback after 450ms
+            self._debounce_after_id = self.after(450, self._debounced_callback)
 
     def _debounced_callback(self):
         """Actually trigger the on_servo_change after debounce period."""
@@ -130,28 +133,39 @@ class ServoControllerFrame(ttk.Frame):
         self.status_var.set(f"Printed values to console: {values}")
 
     def on_servo_change(self, servo_index: int, pulse: int):
-        global driver
-        if driver:
-            driver.move_serial_servo(servo_index, pulse, 500)
+        """
+        Hook for your serial code.
+        Called 300ms after last slider move (debounced) or immediately by buttons.
+        """
+        # Acquire the same shared lock used by MotorControllerFrame
+        lock = getattr(self, "_serial_lock", None)
+        if lock is not None:
+            try:
+                with lock:
+                    self._send_servo_command(servo_index, pulse)
+            except Exception as e:
+                # Keep UI responsive even if serial fails
+                self.status_var.set(f"Servo {servo_index} send failed: {e}")
+        else:
+            # Fallback (shouldn't happen): send without lock
+            self._send_servo_command(servo_index, pulse)
+
+    def _send_servo_command(self, servo_index: int, pulse: int):
+        if self.parent._driver:
+            self.parent._driver.move_serial_servo(servo_index, pulse, 500)
 
 
 class MotorControllerFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent, padding=12)
+        self.parent = parent
         self.status = tk.StringVar(value="Motor Controller Ready")
 
-        import threading, time, queue
+        self.motors = {}  # list of IntVar for Motor 1..4
 
-        self._threading = threading
-        self._time = time
-        self._queue = queue
-
-        self.motors = []  # list of IntVar for Motor 1..4
-
-        self.poll_interval_ms = 500  # overall cadence per full cycle
-        self._poll_q = self._queue.Queue()  # data from worker -> UI
-        self._stop_ev = self._threading.Event()  # stop signal for worker thread
-        self._serial_lock = self._threading.Lock()  # guard serial I/O (reads & writes)
+        self.poll_interval_ms = 750  # overall cadence per full cycle
+        self._poll_q = queue.Queue()  # data from worker -> UI
+        self._stop_ev = threading.Event()  # stop signal for worker thread
         self._poll_thread = None
 
         lf = ttk.LabelFrame(self, text="Motor Controls")
@@ -166,9 +180,7 @@ class MotorControllerFrame(ttk.Frame):
         )
 
         # Start background worker and UI queue draining
-        self._poll_thread = self._threading.Thread(
-            target=self._poll_worker, daemon=True
-        )
+        self._poll_thread = threading.Thread(target=self._poll_worker, daemon=True)
         self._poll_thread.start()
         self.after(50, self._drain_poll_queue)
 
@@ -181,7 +193,6 @@ class MotorControllerFrame(ttk.Frame):
         )
 
         rpm_var = tk.DoubleVar(value=0.0)
-        value_var = tk.IntVar(value=0)
         ttk.Label(parent, textvariable=rpm_var, width=8, anchor="e").grid(
             row=row, column=1, padx=6
         )
@@ -194,10 +205,10 @@ class MotorControllerFrame(ttk.Frame):
             side="left", padx=2
         )
         ttk.Button(
-            btns, text="Fwd", command=lambda i=idx: self._set_speed(i, 1000)
+            btns, text="Fwd", command=lambda i=idx: self._set_speed(i, 700)
         ).pack(side="left", padx=2)
         ttk.Button(
-            btns, text="Rev", command=lambda i=idx: self._set_speed(i, -1000)
+            btns, text="Rev", command=lambda i=idx: self._set_speed(i, -700)
         ).pack(side="left", padx=2)
         ttk.Button(
             btns, text="Accel", command=lambda i=idx: self._adjust_speed(i, +100)
@@ -206,22 +217,23 @@ class MotorControllerFrame(ttk.Frame):
             btns, text="Decel", command=lambda i=idx: self._adjust_speed(i, -100)
         ).pack(side="left", padx=2)
 
-        self.motors.append((value_var, rpm_var))
+        self.motors[idx] = [0, rpm_var]
 
     def _set_speed(self, motor_idx: int, value: int):
         value = max(-2000, min(2000, int(value)))
-        v, _ = self.motors[motor_idx - 1]
-        v.set(value)
-        self.status.set(f"Motor {motor_idx} set to {v.get()} RPM")
+        self.motors[motor_idx][0] = value
+
+        self.status.set(f"Motor {motor_idx} set to {value} RPM")
         try:
-            with self._serial_lock:
-                driver.set_motor_speed(motor_idx, value)  # type: ignore
+            with self.parent._serial_lock:
+                if self.parent._driver:
+                    self.parent._driver.set_motor_speed(motor_idx, value)  # type: ignore
         except Exception as e:
             self.status.set(f"Set speed failed (M{motor_idx}): {e}")
 
     def _adjust_speed(self, motor_idx: int, delta: int):
-        cur, _ = self.motors[motor_idx - 1]
-        self._set_speed(motor_idx, cur.get() + int(delta))
+        cur, _ = self.motors[motor_idx]
+        self._set_speed(motor_idx, cur + int(delta))
 
     def _poll_worker(self):
         """
@@ -229,42 +241,39 @@ class MotorControllerFrame(ttk.Frame):
         Do ALL blocking serial I/O here; UI updates happen via queue -> after().
         """
         # per-motor stagger so a full cycle ~ poll_interval_ms
-        per_motor_sleep = max(0.0, self.poll_interval_ms / 1000.0 / 4.0)
         while not self._stop_ev.is_set():
-            for idx in range(1, 5):  # motors 1..4
-                rpm = None
-                try:
-                    with self._serial_lock:
-                        rpm = self._safe_read_rpm(idx)
-                except Exception:
-                    rpm = None
-                # enqueue result for UI thread
-                self._poll_q.put((idx, rpm))
-                # small stagger between motors
-                if per_motor_sleep > 0:
-                    self._time.sleep(per_motor_sleep)
+            rpm = None
+            try:
+                with self.parent._serial_lock:
+                    rpms = self._safe_read_rpm()
+            except Exception:
+                rpms = [None, None, None, None]
 
-    def _safe_read_rpm(self, motor_idx: int):
+            for i, rpm in enumerate(rpms):
+                # enqueue result for UI thread
+                self._poll_q.put((i + 1, rpm))
+
+            time.sleep(self.poll_interval_ms / 1000.0)
+
+    def _safe_read_rpm(self):
         """
         Replace with your real serial read.
         Must be fast-ish or have an internal timeout.
         Return int (RPM) or None if not available.
         """
         # Example placeholder: echo last known value so UI is stable without hardware.
-
-        driver.get_encoder_values(motor_idx - 1)  # type: ignore
-        last = driver.get_latest_message()  # type: ignore
-
-        return last if isinstance(last, float) else 0.0
+        self.parent._driver.get_encoder_values()  # type: ignore
+        last = self.parent._driver.get_latest_rpm()  # type: ignore
+        return last
 
     def _drain_poll_queue(self):
         try:
             while True:
                 idx, rpm = self._poll_q.get_nowait()
-                if rpm is not None and 1 <= idx <= len(self.motors):
-                    rpm = float(max(-205, min(205, rpm)))
-                    self.motors[idx - 2][1].set(f"{rpm:0.2f}")
-        except self._queue.Empty:
+                if rpm is not None and 1 <= idx <= len(self.motors.items()):
+                    # rpm = float(max(-205, min(205, rpm)))
+                    self.motors[idx][1].set(f"{rpm:0.2f}")
+        except queue.Empty:
             pass
         # re-arm if widget still exists
         if self.winfo_exists() and not self._stop_ev.is_set():
@@ -281,7 +290,7 @@ class SettingsFrame(ttk.Frame):
     def __init__(self, parent, status_var: tk.StringVar):
         super().__init__(parent, padding=16)
         self.status_var = status_var
-        self.driver = None
+        self.parent = parent
 
         self.columnconfigure(1, weight=1)
 
@@ -306,19 +315,17 @@ class SettingsFrame(ttk.Frame):
         )
 
     def _on_connect(self):
-        global driver
         port = self.serial_port_var.get().strip()
         if not port:
             self.status_var.set("Please enter a serial port before connecting.")
             return
-        driver = Driver(port, report=True)
+        self.parent._driver = Driver(port, report=True)
         self.status_var.set(f"Connected to {port} (UI only).")
 
     def _on_disconnect(self):
-        global driver
-        if driver:
-            driver.close()
-            driver = None
+        if self.parent._driver:
+            self.parent._driver.close()
+            self.parent._driver = None
         self.status_var.set("Disconnected.")
 
 
@@ -389,6 +396,10 @@ class App(tk.Tk):
         self.content.grid(row=0, column=1, sticky="nsew")
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
+
+        # create shared props
+        setattr(self.content, "_serial_lock", threading.Lock())
+        setattr(self.content, "_driver", None)
 
         # Existing views
         self.settings_view = SettingsFrame(self.content, self.status_var)

@@ -14,6 +14,7 @@ class Driver:
     __MESSAGE = [0x01, 0x02]
 
     __latest_message = ""
+    __latest_rpm = [0.0] * 4
 
     def __init__(
         self,
@@ -116,12 +117,11 @@ class Driver:
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {traceback.format_exc()}")
 
-    def get_encoder_values(self, motor_id: int):
+    def get_encoder_values(self):
         try:
             payload = [
                 0x07,
-                0x01,
-                motor_id & 0xFF,
+                0x00,
             ]
 
             crc = self.__crc16_ccitt(payload)
@@ -135,13 +135,16 @@ class Driver:
     def get_latest_message(self):
         return self.__latest_message
 
+    def get_latest_rpm(self):
+        return self.__latest_rpm
+
     def __send_data(self, data):
         if self.conn.is_open:
             try:
                 self.__log.debug(f"Data: {[hex(d) for d in data]}")
                 self.conn.write(bytes(data))
-            except Exception:
-                pass
+            except Exception as e:
+                self.__log.error(f"Ex: {e}")
 
     def close(self):
         self.__running = False
@@ -156,8 +159,11 @@ class Driver:
         if function == 0x01:
             self.__latest_message = "".join(chr(h) for h in ext_data)
 
-        if function == 0x02 and len(ext_data) == 4:
-            self.__latest_message = struct.unpack("<f", bytes(ext_data))[0]
+        if function == 0x02 and len(ext_data) == 16:
+            self.__latest_rpm[0] = struct.unpack("<f", bytes(ext_data[:4]))[0]
+            self.__latest_rpm[1] = struct.unpack("<f", bytes(ext_data[4:8]))[0]
+            self.__latest_rpm[2] = struct.unpack("<f", bytes(ext_data[8:12]))[0]
+            self.__latest_rpm[3] = struct.unpack("<f", bytes(ext_data[12:16]))[0]
 
     def __receive_data(self):
         while self.__running:
@@ -191,8 +197,8 @@ class Driver:
                             self.__parse_data(type, payload)
                 else:
                     time.sleep(0.05)
-            except Exception:
-                pass
+            except Exception as e:
+                self.__log.error(f"Ex: {e}")
 
     def setup_receive_thread(self):
         try:

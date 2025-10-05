@@ -1,7 +1,7 @@
 import time
 import logging
 
-from argus.driver import Driver
+from argus.serial import Driver
 
 
 log = logging.getLogger(__file__)

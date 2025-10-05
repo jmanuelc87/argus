@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from argus.driver import Driver
+from argus.serial import Driver
 
 log = logging.getLogger(__file__)
 

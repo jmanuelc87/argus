@@ -6,7 +6,7 @@ import serial
 import logging
 import threading as t
 
-
+from typing import Union
 from abc import ABC, abstractmethod
 
 from argus.isotp_receiver import IsoTpReceiver
@@ -46,7 +46,7 @@ class Response:
     def __init__(self, message) -> None:
         self.message = message
 
-    def get_value(self):
+    def get_value(self) -> Union[str, tuple]:
         return self.message
 
     def __str__(self) -> str:
@@ -54,6 +54,10 @@ class Response:
 
 
 class EncoderResponse(Response):
+    pass
+
+
+class ServoResponse(Response):
     pass
 
 
@@ -68,19 +72,19 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def set_motor_speed(self, motor_id: int, speed: int) -> Response:
+    def set_motor_speed(self, motor_id: int, speed: int):
         pass
 
     @abstractmethod
-    def motor_stop(self, motor_id: int) -> Response:
+    def motor_stop(self, motor_id: int):
         pass
 
     @abstractmethod
-    def move_serial_servo(self, servo_id: int, pulse: int, time: int) -> Response:
+    def move_serial_servo(self, servo_id: int, pulse: int, time: int):
         pass
 
     @abstractmethod
-    def get_serial_servo_angle(self, servo_id: int):
+    def get_servo_angle(self, servo_id: int) -> ServoResponse:
         pass
 
     @abstractmethod
@@ -155,8 +159,6 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(Response, self.messages))
-
     def motor_stop(self, motor_id: int):
         try:
             payload = [
@@ -173,8 +175,6 @@ class SerialDriver(Driver):
             self.__send_data(data)
         except Exception as e:
             self.__log.error(f"Ex: {e}")
-
-        return next(__consume(Response, self.messages))
 
     def move_serial_servo(self, servo_id: int, pulse: int, time: int):
         try:
@@ -196,9 +196,7 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(Response, self.messages))
-
-    def get_serial_servo_angle(self, servo_id: int):
+    def get_servo_angle(self, servo_id: int) -> ServoResponse:
         try:
             payload = [
                 0x06,
@@ -213,6 +211,8 @@ class SerialDriver(Driver):
             self.__send_data(data)
         except Exception as e:
             self.__log.error(f"Ex: {e}")
+
+        return next(__consume(ServoResponse, self.messages))
 
     def get_encoder_values(self) -> EncoderResponse:
         try:
@@ -264,7 +264,12 @@ class SerialDriver(Driver):
             msg = EncoderResponse(tuple(latest_rpm))
             self.messages.put(msg)
 
-        # TODO: Implement the response for get_serial_servo_angle
+        if function == 0x03 and len(ext_data) == 4:
+            angle = [0.0]
+            angle[0] = struct.unpack("<f", bytes(ext_data[:4]))[0]
+
+            msg = ServoResponse(tuple(angle))
+            self.messages.put(msg)
 
     def __receive_data(self):
         while self.__running:
@@ -412,7 +417,7 @@ class CanbusDriver(ABC):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def get_serial_servo_angle(self, servo_id: int):
+    def get_servo_angle(self, servo_id: int):
         try:
             payload = [
                 0x06,
@@ -428,7 +433,9 @@ class CanbusDriver(ABC):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def get_encoder_values(self):
+        return next(__consume(ServoResponse, self.messages))
+
+    def get_encoder_values(self) -> EncoderResponse:
         try:
             payload = [
                 0x07,
@@ -459,6 +466,13 @@ class CanbusDriver(ABC):
             latest_rpm[3] = struct.unpack("<f", bytes(payload[15:19]))[0]
 
             msg = EncoderResponse(tuple(latest_rpm))
+            self.messages.put(msg)
+
+        if payload[1] == 0x03 and payload[2] == 4:
+            angle = [0.0]
+            angle[0] = struct.unpack("<f", bytes(payload[3:7]))[0]
+
+            msg = ServoResponse(tuple(angle))
             self.messages.put(msg)
 
     def close(self):

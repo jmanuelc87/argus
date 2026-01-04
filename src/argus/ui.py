@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from argus.serial import Driver
+from argus.driver import SerialDriver, CanbusDriver
 
 log = logging.getLogger(__file__)
 
@@ -294,19 +294,43 @@ class SettingsFrame(ttk.Frame):
 
         self.columnconfigure(1, weight=1)
 
-        ttk.Label(self, text="Serial Settings", font=("", 11, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 10)
+        ttk.Label(self, text="Connection Settings", font=("", 11, "bold")).grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 12)
         )
 
-        ttk.Label(self, text="Port:").grid(row=1, column=0, sticky="w", padx=(0, 8))
-        self.serial_port_var = tk.StringVar(
-            value="/dev/tty.usbserial-2130"
-        )  # adjust default for your system
-        self.serial_entry = ttk.Entry(self, textvariable=self.serial_port_var)
-        self.serial_entry.grid(row=1, column=1, sticky="ew", pady=4)
+        # --- Transport selection (NEW) ---
+        ttk.Label(self, text="Transport:").grid(
+            row=1, column=0, sticky="w", padx=(0, 8)
+        )
+        self.transport_var = tk.StringVar(value="serial")
+
+        transport_frame = ttk.Frame(self)
+        transport_frame.grid(row=1, column=1, columnspan=2, sticky="w")
+
+        ttk.Radiobutton(
+            transport_frame,
+            text="Serial",
+            value="serial",
+            variable=self.transport_var,
+        ).pack(side="left", padx=(0, 12))
+
+        ttk.Radiobutton(
+            transport_frame,
+            text="CAN Bus",
+            value="canbus",
+            variable=self.transport_var,
+        ).pack(side="left")
+
+        # --- Serial / CAN identifier entry ---
+        ttk.Label(self, text="Port / Interface:").grid(
+            row=2, column=0, sticky="w", padx=(0, 8)
+        )
+        self.port_var = tk.StringVar(value="")
+        self.serial_entry = ttk.Entry(self, textvariable=self.port_var)
+        self.serial_entry.grid(row=2, column=1, sticky="ew", pady=6)
 
         btns = ttk.Frame(self)
-        btns.grid(row=1, column=2, padx=(8, 0))
+        btns.grid(row=2, column=2, padx=(8, 0))
         ttk.Button(btns, text="Connect", command=self._on_connect).pack(
             side="left", padx=2
         )
@@ -314,13 +338,34 @@ class SettingsFrame(ttk.Frame):
             side="left", padx=2
         )
 
+        def _on_transport_change(*_):
+            transport = self.transport_var.get()
+            if transport == "serial":
+                self.port_var.set("/dev/tty.usbserial-2130")
+            else:
+                self.port_var.set("/dev/tty.usbmodem206B358043331")
+
+        # Trigger handler whenever radio selection changes
+        self.transport_var.trace_add("write", _on_transport_change)
+
     def _on_connect(self):
-        port = self.serial_port_var.get().strip()
+        transport = self.transport_var.get()
+        port = self.port_var.get().strip()
         if not port:
-            self.status_var.set("Please enter a serial port before connecting.")
+            self.status_var.set("Please enter a port or interface name.")
             return
-        self.parent._driver = Driver(port, report=True)
-        self.status_var.set(f"Connected to {port} (UI only).")
+        try:
+            if transport == "serial":
+                self.parent._driver = SerialDriver(port, report=True)
+            else:
+                self.parent._driver = CanbusDriver(
+                    interface="slcan",
+                    channel=port,
+                    bitrate=500000,
+                )
+            self.status_var.set(f"Connected via {transport} ({port}) [UI only].")
+        except Exception as e:
+            self.status_var.set(f"{e}")
 
     def _on_disconnect(self):
         if self.parent._driver:
@@ -368,7 +413,7 @@ class App(tk.Tk):
         ).pack(anchor="w", pady=4)
         ttk.Radiobutton(
             sidebar,
-            text="Servo Controller",
+            text="Serial Servo Controller",
             value="servo",
             variable=self.view_var,
             command=self._switch_view,

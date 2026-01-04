@@ -327,15 +327,20 @@ class CanbusDriver(ABC):
         self.__log.info(
             f"Opening CAN bus: {self.interface} {self.channel} @ {self.bitrate}"
         )
-        self.canbus = self._make_canbus()
 
-        self.sender = IsoTpSender(self.canbus, tx_id=0x700, fc_id=0x701)
-        self.receiver = IsoTpReceiver(
-            self.canbus, rx_id=0x702, fc_id=0x701, on_message=self.on_msg
-        )
+        try:
+            self.canbus = self._make_canbus()
 
-        self.messages = queue.Queue(-1)
-        self.receiver.start()
+            self.sender = IsoTpSender(self.canbus, tx_id=0x700, fc_id=0x701)
+            self.receiver = IsoTpReceiver(
+                self.canbus, rx_id=0x702, fc_id=0x701, on_message=self.on_msg
+            )
+
+            self.messages = queue.Queue(-1)
+            self.receiver.start()
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+            raise Exception("Error connecting to canbus")
 
     def _make_canbus(self):
         kwargs = dict(interface=self.interface, channel=self.channel)
@@ -458,7 +463,7 @@ class CanbusDriver(ABC):
 
     def close(self):
         try:
-            if self.receiver:
+            if hasattr(self, "receiver") and self.receiver:
                 self.receiver.stop()
         except Exception as e:
             self.__log.error(f"Ex: {e}")
@@ -466,7 +471,7 @@ class CanbusDriver(ABC):
         time.sleep(0.01)
 
         try:
-            if self.canbus and not self.canbus._is_shutdown:
+            if hasattr(self, "canbus") and self.canbus and not self.canbus._is_shutdown:
                 self.canbus.shutdown()
         except Exception as e:
             self.__log.error(f"Ex: {e}")

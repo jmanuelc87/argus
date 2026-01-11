@@ -13,7 +13,7 @@ from argus.isotp_receiver import IsoTpReceiver
 from argus.isotp_sender import IsoTpSender
 
 
-def __crc16_ccitt(data, crc: int = 0xFFFF) -> int:
+def _crc16_ccitt(data, crc: int = 0xFFFF) -> int:
     """
     Compute CRC16-CCITT (polynomial 0x1021, initial value 0xFFFF).
     """
@@ -27,18 +27,25 @@ def __crc16_ccitt(data, crc: int = 0xFFFF) -> int:
     return crc
 
 
-def __consume(instance, queue):
-    time.sleep(0.1)
+class Iter:
 
-    while True:
-        item = queue.get()
-        if isinstance(item, instance):
-            yield item
-            break
-        if item is None:
-            break
-        queue.task_done()
-    queue.task_done()
+    @staticmethod
+    def consume(instance, queue):
+        item = None
+        while True:
+            time.sleep(0.2)
+            try:
+                item = queue.get(block=True, timeout=1.0)
+            except:
+                pass
+            if isinstance(item, instance):
+                yield item
+                break
+            if item is None:
+                break
+
+        if item is not None:
+            queue.task_done()
 
 
 class Response:
@@ -68,7 +75,7 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def ping(self) -> Response:
+    def ping(self) -> Union[None, Response]:
         pass
 
     @abstractmethod
@@ -84,11 +91,11 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def get_servo_angle(self, servo_id: int) -> ServoResponse:
+    def get_servo_angle(self, servo_id: int) -> Union[None, ServoResponse]:
         pass
 
     @abstractmethod
-    def get_encoder_values(self) -> EncoderResponse:
+    def get_encoder_values(self) -> Union[None, EncoderResponse]:
         pass
 
     @abstractmethod
@@ -132,14 +139,14 @@ class SerialDriver(Driver):
     def is_connected(self) -> bool:
         return self.connected
 
-    def ping(self) -> Response:
+    def ping(self) -> Union[None, Response]:
         try:
             data = [0xAA, 0x01, 0x00, 0x2E, 0x3E, 0x55]
             self.__send_data(data)
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(Response, self.messages))
+        return next(Iter.consume(Response, self.messages))
 
     def set_motor_speed(self, motor_id: int, speed: int):
         try:
@@ -151,7 +158,7 @@ class SerialDriver(Driver):
                 int(speed) & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
 
@@ -168,7 +175,7 @@ class SerialDriver(Driver):
                 0x00,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
 
@@ -188,7 +195,7 @@ class SerialDriver(Driver):
                 time & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
 
@@ -196,7 +203,8 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def get_servo_angle(self, servo_id: int) -> ServoResponse:
+    def get_servo_angle(self, servo_id: int) -> Union[None, ServoResponse]:
+        assert 1 <= servo_id <= 3, "servo_id must be 1, 2 or 3."
         try:
             payload = [
                 0x06,
@@ -204,7 +212,7 @@ class SerialDriver(Driver):
                 servo_id & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
 
@@ -212,16 +220,16 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(ServoResponse, self.messages))
+        return next(Iter.consume(ServoResponse, self.messages))
 
-    def get_encoder_values(self) -> EncoderResponse:
+    def get_encoder_values(self) -> Union[None, EncoderResponse]:
         try:
             payload = [
                 0x07,
                 0x00,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
 
@@ -229,7 +237,7 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(EncoderResponse, self.messages))
+        return next(Iter.consume(EncoderResponse, self.messages))
 
     def __send_data(self, data):
         if self.conn.is_open:
@@ -296,7 +304,7 @@ class SerialDriver(Driver):
                         crc2 = bytearray(self.conn.read())[0]
 
                         rx_crc = (crc1 << 8) | crc2
-                        crc = __crc16_ccitt([type, lenx, *payload])
+                        crc = _crc16_ccitt([type, lenx, *payload])
 
                         if crc == rx_crc:
                             self.__log.debug(payload)
@@ -360,7 +368,7 @@ class CanbusDriver(ABC):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(Response, self.messages))
+        return next(Iter.consume(Response, self.messages))
 
     def set_motor_speed(self, motor_id: int, speed: int):
         try:
@@ -372,7 +380,7 @@ class CanbusDriver(ABC):
                 int(speed) & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
 
@@ -389,7 +397,7 @@ class CanbusDriver(ABC):
                 0x00,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
 
@@ -397,7 +405,7 @@ class CanbusDriver(ABC):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def move_serial_servo(self, servo_id: int, pulse: int, time: int):
+    def move_serial_servo(self, servo_id: int, pulse: int, time2move: int):
         try:
             payload = [
                 0x05,
@@ -405,19 +413,21 @@ class CanbusDriver(ABC):
                 servo_id & 0xFF,
                 (pulse >> 8) & 0xFF,
                 pulse & 0xFF,
-                (time >> 8) & 0xFF,
-                time & 0xFF,
+                (time2move >> 8) & 0xFF,
+                time2move & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
 
+            time.sleep(0.5)
             self.sender.send(data)
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
     def get_servo_angle(self, servo_id: int):
+        assert 1 <= servo_id <= 3, "servo_id must be 1, 2 or 3."
         try:
             payload = [
                 0x06,
@@ -425,32 +435,37 @@ class CanbusDriver(ABC):
                 servo_id & 0xFF,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
 
+            time.sleep(0.5)
             self.sender.send(data)
+
+            return next(Iter.consume(ServoResponse, self.messages))
         except Exception as e:
-            self.__log.error(f"Ex: {e}")
+            self.__log.error(f"Error - consuming servo angle: {e}")
 
-        return next(__consume(ServoResponse, self.messages))
+        return None
 
-    def get_encoder_values(self) -> EncoderResponse:
+    def get_encoder_values(self):
         try:
             payload = [
                 0x07,
                 0x00,
             ]
 
-            crc = __crc16_ccitt(payload)
+            crc = _crc16_ccitt(payload)
 
             data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
 
             self.sender.send(data)
+
+            return next(Iter.consume(EncoderResponse, self.messages))
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-        return next(__consume(EncoderResponse, self.messages))
+        return None
 
     def on_msg(self, payload: bytes):
         if payload[1] == 0x01:
@@ -468,7 +483,7 @@ class CanbusDriver(ABC):
             msg = EncoderResponse(tuple(latest_rpm))
             self.messages.put(msg)
 
-        if payload[1] == 0x03 and payload[2] == 4:
+        if payload[1] == 0x03:
             angle = [0.0]
             angle[0] = struct.unpack("<f", bytes(payload[3:7]))[0]
 

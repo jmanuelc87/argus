@@ -262,9 +262,8 @@ class MotorControllerFrame(ttk.Frame):
         Return int (RPM) or None if not available.
         """
         # Example placeholder: echo last known value so UI is stable without hardware.
-        self.parent._driver.get_encoder_values()  # type: ignore
-        last = self.parent._driver.get_latest_rpm()  # type: ignore
-        return last
+        last = self.parent._driver.get_encoder_values()
+        return last.get_value()
 
     def _drain_poll_queue(self):
         try:

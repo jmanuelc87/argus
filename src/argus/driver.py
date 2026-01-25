@@ -154,8 +154,8 @@ class SerialDriver(Driver):
                 0x02,
                 0x03,
                 motor_id & 0xFF,
-                (int(speed) >> 8) & 0xFF,
-                int(speed) & 0xFF,
+                (speed >> 8) & 0xFF,
+                speed & 0xFF,
             ]
 
             crc = _crc16_ccitt(payload)
@@ -349,7 +349,7 @@ class CanbusDriver(ABC):
                 self.canbus, rx_id=0x702, fc_id=0x701, on_message=self.on_msg
             )
 
-            self.messages = queue.Queue(-1)
+            self.messages = queue.Queue()
             self.receiver.start()
         except Exception as e:
             self.__log.error(f"Ex: {e}")
@@ -364,6 +364,7 @@ class CanbusDriver(ABC):
     def ping(self):
         try:
             data = bytes([0xAA, 0x01, 0x00, 0x2E, 0x3E, 0x55])
+            self.__log.info(f"{data}")
             self.sender.send(data)
         except Exception as e:
             self.__log.error(f"Ex: {e}")
@@ -376,8 +377,8 @@ class CanbusDriver(ABC):
                 0x02,
                 0x03,
                 motor_id & 0xFF,
-                (int(speed) >> 8) & 0xFF,
-                int(speed) & 0xFF,
+                (speed >> 8) & 0xFF,
+                speed & 0xFF,
             ]
 
             crc = _crc16_ccitt(payload)
@@ -386,7 +387,7 @@ class CanbusDriver(ABC):
 
             self.sender.send(data)
         except Exception as e:
-            self.__log.error(f"Ex: {e}")
+            self.__log.error(f"Ex: {e} -- {type(e)}")
 
     def motor_stop(self, motor_id: int):
         try:

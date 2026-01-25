@@ -8,10 +8,11 @@ from argus.driver import CanbusDriver
 log = logging.getLogger(__file__)
 
 
+tty = "/dev/tty.usbmodem206B358043331"
+
+
 def test_ping():
-    driver = CanbusDriver(
-        interface="slcan", channel="/dev/tty.usbmodem206B358043331", bitrate=500000
-    )
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
     msg1 = driver.ping()
 
@@ -26,9 +27,7 @@ def test_ping():
 
 
 def test_double_ping():
-    driver = CanbusDriver(
-        interface="slcan", channel="/dev/tty.usbmodem206B358043331", bitrate=500000
-    )
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
     msg1 = driver.ping()
 
@@ -47,12 +46,22 @@ def test_double_ping():
     time.sleep(1)
 
     driver.close()
+    
+    
+def test_move_motor():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.set_motor_speed(1, 2000)
+
+    time.sleep(5)
+    
+    driver.motor_stop(1)
+    
+    driver.close()
 
 
 def test_move_serial_servo():
-    driver = CanbusDriver(
-        interface="slcan", channel="/dev/tty.usbmodem206B358043331", bitrate=500000
-    )
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
     driver.move_serial_servo(1, 2000, 500)
 
@@ -68,9 +77,7 @@ def test_move_serial_servo():
 
 
 def test_double_move_serial_servo():
-    driver = CanbusDriver(
-        interface="slcan", channel="/dev/tty.usbmodem206B358043331", bitrate=500000
-    )
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
     driver.move_serial_servo(1, 2000, 500)
 

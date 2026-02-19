@@ -94,8 +94,13 @@ class IsoTpSender:
         self._send_frame(self.tx_id, ff)
         offset = 6
 
+        # Wait for Flow Control (CTS) before sending Consecutive Frames
+        stmin = self._wait_fc_cts(timeout_s)
+        if stmin is None:
+            return False
+
         # Interpret STmin (0..127 ms). Ignore microsecond encodings (0xF1..0xF9).
-        delay_ms = 100
+        delay_ms = stmin if 0 <= stmin <= 127 else 0
 
         # Send Consecutive Frames: [PCI|SN][up to 7 data]
         sn = 1

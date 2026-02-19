@@ -30,22 +30,22 @@ def _crc16_ccitt(data, crc: int = 0xFFFF) -> int:
 class Iter:
 
     @staticmethod
-    def consume(instance, queue):
+    def consume(instance, q):
         item = None
         while True:
             time.sleep(0.2)
             try:
-                item = queue.get(block=True, timeout=1.0)
-            except:
-                pass
+                item = q.get(block=True, timeout=1.0)
+            except queue.Empty:
+                break
             if isinstance(item, instance):
+                q.task_done()
                 yield item
                 break
-            if item is None:
-                break
-
-        if item is not None:
-            queue.task_done()
+            # Put back non-matching items so they aren't lost
+            q.task_done()
+            q.put(item)
+            item = None
 
 
 class Response:
@@ -65,6 +65,10 @@ class EncoderResponse(Response):
 
 
 class ServoResponse(Response):
+    pass
+
+
+class ImuResponse(Response):
     pass
 
 
@@ -99,6 +103,26 @@ class Driver(ABC):
         pass
 
     @abstractmethod
+    def move_pwm_servo(self, servo_id: int, angle: int):
+        pass
+
+    @abstractmethod
+    def get_imu_values(self) -> Union[None, "ImuResponse"]:
+        pass
+
+    @abstractmethod
+    def pid_set_rpm(self, motor_id: int, rpm: float):
+        pass
+
+    @abstractmethod
+    def pid_motor_stop(self, motor_id: int, brake: int = 0):
+        pass
+
+    @abstractmethod
+    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+        pass
+
+    @abstractmethod
     def close(self):
         pass
 
@@ -108,7 +132,7 @@ class SerialDriver(Driver):
     __running = False
     __HEAD = 0xAA
 
-    __MESSAGE = [0x01, 0x02]
+    __MESSAGE = [0x01, 0x02, 0x03, 0x04]
 
     def __init__(
         self,
@@ -239,6 +263,99 @@ class SerialDriver(Driver):
 
         return next(Iter.consume(EncoderResponse, self.messages))
 
+    def move_pwm_servo(self, servo_id: int, angle: int):
+        try:
+            payload = [
+                0x04,
+                0x02,
+                servo_id & 0xFF,
+                angle & 0xFF,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def get_imu_values(self) -> Union[None, ImuResponse]:
+        try:
+            payload = [
+                0x08,
+                0x00,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+        return next(Iter.consume(ImuResponse, self.messages))
+
+    def pid_set_rpm(self, motor_id: int, rpm: float):
+        try:
+            rpm_bytes = list(struct.pack("<f", rpm))
+            payload = [
+                0x09,
+                0x05,
+                motor_id & 0xFF,
+                *rpm_bytes,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def pid_motor_stop(self, motor_id: int, brake: int = 0):
+        try:
+            payload = [
+                0x0A,
+                0x02,
+                motor_id & 0xFF,
+                brake & 0xFF,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+        try:
+            kp_bytes = list(struct.pack("<f", kp))
+            ki_bytes = list(struct.pack("<f", ki))
+            kd_bytes = list(struct.pack("<f", kd))
+            gain_payload = [motor_id & 0xFF, *kp_bytes, *ki_bytes, *kd_bytes]
+
+            if save:
+                gain_payload.append(save & 0xFF)
+
+            payload = [
+                0x0B,
+                len(gain_payload) & 0xFF,
+                *gain_payload,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
     def __send_data(self, data):
         if self.conn.is_open:
             try:
@@ -277,6 +394,11 @@ class SerialDriver(Driver):
             angle[0] = struct.unpack("<f", bytes(ext_data[:4]))[0]
 
             msg = ServoResponse(tuple(angle))
+            self.messages.put(msg)
+
+        if function == 0x04 and len(ext_data) == 20:
+            values = struct.unpack(">10h", bytes(ext_data[:20]))
+            msg = ImuResponse(values)
             self.messages.put(msg)
 
     def __receive_data(self):
@@ -468,6 +590,101 @@ class CanbusDriver(ABC):
 
         return None
 
+    def move_pwm_servo(self, servo_id: int, angle: int):
+        try:
+            payload = [
+                0x04,
+                0x02,
+                servo_id & 0xFF,
+                angle & 0xFF,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def get_imu_values(self):
+        try:
+            payload = [
+                0x08,
+                0x00,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+
+            return next(Iter.consume(ImuResponse, self.messages))
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+        return None
+
+    def pid_set_rpm(self, motor_id: int, rpm: float):
+        try:
+            rpm_bytes = list(struct.pack("<f", rpm))
+            payload = [
+                0x09,
+                0x05,
+                motor_id & 0xFF,
+                *rpm_bytes,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def pid_motor_stop(self, motor_id: int, brake: int = 0):
+        try:
+            payload = [
+                0x0A,
+                0x02,
+                motor_id & 0xFF,
+                brake & 0xFF,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+        try:
+            kp_bytes = list(struct.pack("<f", kp))
+            ki_bytes = list(struct.pack("<f", ki))
+            kd_bytes = list(struct.pack("<f", kd))
+            gain_payload = [motor_id & 0xFF, *kp_bytes, *ki_bytes, *kd_bytes]
+
+            if save:
+                gain_payload.append(save & 0xFF)
+
+            payload = [
+                0x0B,
+                len(gain_payload) & 0xFF,
+                *gain_payload,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
     def on_msg(self, payload: bytes):
         if payload[1] == 0x01:
             len = payload[2]
@@ -489,6 +706,11 @@ class CanbusDriver(ABC):
             angle[0] = struct.unpack("<f", bytes(payload[3:7]))[0]
 
             msg = ServoResponse(tuple(angle))
+            self.messages.put(msg)
+
+        if payload[1] == 0x04 and payload[2] == 20:
+            values = struct.unpack(">10h", bytes(payload[3:23]))
+            msg = ImuResponse(values)
             self.messages.put(msg)
 
     def close(self):

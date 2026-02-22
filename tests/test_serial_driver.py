@@ -11,6 +11,7 @@ def test_ping():
     driver = SerialDriver("/dev/tty.usbserial-2130", report=True)
     msg = driver.ping()
 
+    assert msg is not None
     assert msg.get_value() == "OK!"
 
     log.info(msg)

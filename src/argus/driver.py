@@ -72,6 +72,10 @@ class ImuResponse(Response):
     pass
 
 
+class BatteryResponse(Response):
+    pass
+
+
 class Driver(ABC):
 
     @abstractmethod
@@ -91,7 +95,7 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def move_serial_servo(self, servo_id: int, pulse: int, time: int):
+    def move_serial_servo(self, servo_id: int, pulse: int, time2move: int):
         pass
 
     @abstractmethod
@@ -123,6 +127,10 @@ class Driver(ABC):
         pass
 
     @abstractmethod
+    def get_battery_data(self) -> Union[None, "BatteryResponse"]:
+        pass
+
+    @abstractmethod
     def close(self):
         pass
 
@@ -132,7 +140,7 @@ class SerialDriver(Driver):
     __running = False
     __HEAD = 0xAA
 
-    __MESSAGE = [0x01, 0x02, 0x03, 0x04]
+    __MESSAGE = [0x01, 0x02, 0x03, 0x04, 0x05]
 
     def __init__(
         self,
@@ -207,7 +215,7 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def move_serial_servo(self, servo_id: int, pulse: int, time: int):
+    def move_serial_servo(self, servo_id: int, pulse: int, time2move: int):
         try:
             payload = [
                 0x05,
@@ -215,8 +223,8 @@ class SerialDriver(Driver):
                 servo_id & 0xFF,
                 (pulse >> 8) & 0xFF,
                 pulse & 0xFF,
-                (time >> 8) & 0xFF,
-                time & 0xFF,
+                (time2move >> 8) & 0xFF,
+                time2move & 0xFF,
             ]
 
             crc = _crc16_ccitt(payload)
@@ -356,6 +364,23 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
+    def get_battery_data(self) -> Union[None, BatteryResponse]:
+        try:
+            payload = [
+                0x0C,
+                0x00,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = [0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55]
+
+            self.__send_data(data)
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+        return next(Iter.consume(BatteryResponse, self.messages))
+
     def __send_data(self, data):
         if self.conn.is_open:
             try:
@@ -399,6 +424,12 @@ class SerialDriver(Driver):
         if function == 0x04 and len(ext_data) == 20:
             values = struct.unpack(">10h", bytes(ext_data[:20]))
             msg = ImuResponse(values)
+            self.messages.put(msg)
+
+        if function == 0x05 and len(ext_data) == 8:
+            voltage = struct.unpack("<f", bytes(ext_data[:4]))[0]
+            percentage = struct.unpack("<f", bytes(ext_data[4:8]))[0]
+            msg = BatteryResponse((voltage, percentage))
             self.messages.put(msg)
 
     def __receive_data(self):
@@ -451,7 +482,7 @@ class SerialDriver(Driver):
             self.__log.error(f"Error: {e}")
 
 
-class CanbusDriver(ABC):
+class CanbusDriver(Driver):
     __log = logging.getLogger(__file__)
 
     def __init__(self, interface: str, channel: str, bitrate: int) -> None:
@@ -482,6 +513,9 @@ class CanbusDriver(ABC):
         if self.interface.lower() in ("slcan", "pcan", "kvaser"):
             kwargs["bitrate"] = str(self.bitrate)
         return can.Bus(**kwargs, ignore_config=False)
+
+    def is_connected(self) -> bool:
+        return hasattr(self, "canbus") and self.canbus is not None
 
     def ping(self):
         try:
@@ -685,6 +719,25 @@ class CanbusDriver(ABC):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
+    def get_battery_data(self):
+        try:
+            payload = [
+                0x0C,
+                0x00,
+            ]
+
+            crc = _crc16_ccitt(payload)
+
+            data = bytes([0xAA, *payload, (crc >> 8) & 0xFF, crc & 0xFF, 0x55])
+
+            self.sender.send(data)
+
+            return next(Iter.consume(BatteryResponse, self.messages))
+        except Exception as e:
+            self.__log.error(f"Ex: {e}")
+
+        return None
+
     def on_msg(self, payload: bytes):
         if payload[1] == 0x01:
             len = payload[2]
@@ -711,6 +764,12 @@ class CanbusDriver(ABC):
         if payload[1] == 0x04 and payload[2] == 20:
             values = struct.unpack(">10h", bytes(payload[3:23]))
             msg = ImuResponse(values)
+            self.messages.put(msg)
+
+        if payload[1] == 0x05 and payload[2] == 8:
+            voltage = struct.unpack("<f", bytes(payload[3:7]))[0]
+            percentage = struct.unpack("<f", bytes(payload[7:11]))[0]
+            msg = BatteryResponse((voltage, percentage))
             self.messages.put(msg)
 
     def close(self):

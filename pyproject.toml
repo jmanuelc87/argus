@@ -19,7 +19,7 @@ dependencies = [
 package = true
 
 [project.scripts]
-ui = "argus.ui:main"
+ui = "argus.ui.main:main"
 
 [tool.pytest.ini_options]
 log_cli = true

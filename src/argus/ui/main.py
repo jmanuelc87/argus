@@ -6,7 +6,9 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from argus.driver import SerialDriver, CanbusDriver
+from typing import Callable
+
+from argus.driver import Driver, SerialDriver, CanbusDriver
 
 log = logging.getLogger(__file__)
 
@@ -17,9 +19,9 @@ DEFAULT_PULSE = (MIN_PULSE + MAX_PULSE) // 2  # 2000
 
 
 class ServoControllerFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, app: "App"):
         super().__init__(parent, padding=12)
-        self.parent = parent
+        self.app = app
         self.scales = []
         self.send_on_change = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
@@ -27,8 +29,6 @@ class ServoControllerFrame(ttk.Frame):
         self._debounce_after_id = None
         self._debounce_idx = None
         self._debounce_value = None
-
-        self._serial_lock = self.parent._serial_lock
 
         # Create three servo rows
         for i in range(3):
@@ -138,27 +138,21 @@ class ServoControllerFrame(ttk.Frame):
         Called 300ms after last slider move (debounced) or immediately by buttons.
         """
         # Acquire the same shared lock used by MotorControllerFrame
-        lock = getattr(self, "_serial_lock", None)
-        if lock is not None:
-            try:
-                with lock:
-                    self._send_servo_command(servo_index, pulse)
-            except Exception as e:
-                # Keep UI responsive even if serial fails
-                self.status_var.set(f"Servo {servo_index} send failed: {e}")
-        else:
-            # Fallback (shouldn't happen): send without lock
-            self._send_servo_command(servo_index, pulse)
+        try:
+            with self.app._serial_lock:
+                self._send_servo_command(servo_index, pulse)
+        except Exception as e:
+            self.status_var.set(f"Servo {servo_index} send failed: {e}")
 
     def _send_servo_command(self, servo_index: int, pulse: int):
-        if self.parent._driver:
-            self.parent._driver.move_serial_servo(servo_index, pulse, 500)
+        if self.app._driver:
+            self.app._driver.move_serial_servo(servo_index, pulse, 500)
 
 
 class MotorControllerFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, app: "App"):
         super().__init__(parent, padding=12)
-        self.parent = parent
+        self.app = app
         self.status = tk.StringVar(value="Motor Controller Ready")
 
         self.motors = {}  # list of IntVar for Motor 1..4
@@ -225,8 +219,8 @@ class MotorControllerFrame(ttk.Frame):
 
         self.status.set(f"Motor {motor_idx} set to {value} RPM")
         try:
-            with self.parent._serial_lock:
-                if self.parent._driver:
+            with self.app._serial_lock:
+                if self.app._driver:
                     self.parent._driver.set_motor_speed(motor_idx, value)  # type: ignore
         except Exception as e:
             self.status.set(f"Set speed failed (M{motor_idx}): {e}")
@@ -244,7 +238,7 @@ class MotorControllerFrame(ttk.Frame):
         while not self._stop_ev.is_set():
             rpm = None
             try:
-                with self.parent._serial_lock:
+                with self.app._serial_lock:
                     rpms = self._safe_read_rpm()
             except Exception:
                 rpms = [None, None, None, None]
@@ -262,7 +256,7 @@ class MotorControllerFrame(ttk.Frame):
         Return int (RPM) or None if not available.
         """
         # Example placeholder: echo last known value so UI is stable without hardware.
-        last = self.parent._driver.get_encoder_values()
+        last = self.app._driver.get_encoder_values()
         return last.get_value()
 
     def _drain_poll_queue(self):
@@ -286,10 +280,17 @@ class MotorControllerFrame(ttk.Frame):
 class SettingsFrame(ttk.Frame):
     """Settings panel for configuring serial connection."""
 
-    def __init__(self, parent, status_var: tk.StringVar):
+    def __init__(
+        self,
+        parent,
+        status_var: tk.StringVar,
+        on_connect: Callable[["Driver"], None] | None = None,
+        on_disconnect: Callable[[], None] | None = None,
+    ):
         super().__init__(parent, padding=16)
         self.status_var = status_var
-        self.parent = parent
+        self._on_connect_cb = on_connect
+        self._on_disconnect_cb = on_disconnect
 
         self.columnconfigure(1, weight=1)
 
@@ -355,21 +356,22 @@ class SettingsFrame(ttk.Frame):
             return
         try:
             if transport == "serial":
-                self.parent._driver = SerialDriver(port, report=True)
+                driver = SerialDriver(port, report=True)
             else:
-                self.parent._driver = CanbusDriver(
+                driver = CanbusDriver(
                     interface="slcan",
                     channel=port,
                     bitrate=500000,
                 )
-            self.status_var.set(f"Connected via {transport} ({port}) [UI only].")
+            self.status_var.set(f"Connected via {transport} ({port}).")
+            if self._on_connect_cb:
+                self._on_connect_cb(driver)
         except Exception as e:
             self.status_var.set(f"{e}")
 
     def _on_disconnect(self):
-        if self.parent._driver:
-            self.parent._driver.close()
-            self.parent._driver = None
+        if self._on_disconnect_cb:
+            self._on_disconnect_cb()
         self.status_var.set("Disconnected.")
 
 
@@ -380,11 +382,27 @@ class App(tk.Tk):
         self.geometry("1020x380")
         self.resizable(False, False)
 
+        # Shared state
+        self._serial_lock = threading.Lock()
+        self._driver: Driver | None = None
+        self._battery_q: queue.Queue = queue.Queue()
+        self._battery_stop = threading.Event()
+        self._battery_thread: threading.Thread | None = None
+
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
+
+        # Status bar at the bottom
+        status_bar = ttk.Frame(self, relief="sunken")
+        status_bar.pack(side="bottom", fill="x")
+        self.battery_var = tk.StringVar(value="Battery: --")
+        ttk.Label(
+            status_bar, textvariable=self.battery_var, anchor="e", padding=(8, 4)
+        ).pack(side="right")
+        ttk.Separator(self, orient="horizontal").pack(side="bottom", fill="x")
 
         # Layout: left sidebar, right content
         root = ttk.Frame(self)
@@ -441,20 +459,22 @@ class App(tk.Tk):
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
 
-        # create shared props
-        setattr(self.content, "_serial_lock", threading.Lock())
-        setattr(self.content, "_driver", None)
-
         # Existing views
-        self.settings_view = SettingsFrame(self.content, self.status_var)
-        self.servo_view = ServoControllerFrame(self.content)
-        self.motor_view = MotorControllerFrame(self.content)
+        self.settings_view = SettingsFrame(
+            self.content,
+            self.status_var,
+            on_connect=self._handle_connect,
+            on_disconnect=self._handle_disconnect,
+        )
+        self.servo_view = ServoControllerFrame(self.content, self)
+        self.motor_view = MotorControllerFrame(self.content, self)
 
         # Stack all views; raise the selected one
         for f in (self.settings_view, self.servo_view, self.motor_view):
             f.grid(row=0, column=0, sticky="nsew")
 
         self._switch_view()  # show default
+        self.after(100, self._drain_battery_queue)
 
     def _switch_view(self):
         view = self.view_var.get()
@@ -467,6 +487,53 @@ class App(tk.Tk):
         else:
             self.settings_view.tkraise()
             self.status_var.set("Open Settings to configure serial port.")
+
+
+    def _handle_connect(self, driver: Driver):
+        self._driver = driver
+        self.start_battery_polling()
+
+    def _handle_disconnect(self):
+        self.stop_battery_polling()
+        with self._serial_lock:
+            if self._driver:
+                self._driver.close()
+                self._driver = None
+
+    def start_battery_polling(self):
+        self._battery_stop.clear()
+        self._battery_thread = threading.Thread(
+            target=self._battery_worker, daemon=True
+        )
+        self._battery_thread.start()
+
+    def stop_battery_polling(self):
+        self._battery_stop.set()
+        self._battery_thread = None
+        self.battery_var.set("Battery: --")
+
+    def _battery_worker(self):
+        while not self._battery_stop.is_set():
+            try:
+                with self._serial_lock:
+                    if self._driver:
+                        resp = self._driver.get_battery_data()
+                        if resp:
+                            voltage, percentage = resp.get_value()
+                            self._battery_q.put((voltage, percentage))
+            except Exception:
+                pass
+            self._battery_stop.wait(5.0)
+
+    def _drain_battery_queue(self):
+        try:
+            while True:
+                voltage, percentage = self._battery_q.get_nowait()
+                self.battery_var.set(f"Battery: {percentage:.0f}% ({voltage:.1f}V)")
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.after(500, self._drain_battery_queue)
 
 
 def main():

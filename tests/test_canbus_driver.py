@@ -76,6 +76,121 @@ def test_move_serial_servo():
     driver.close()
 
 
+def test_get_encoder_values_not_none():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_get_encoder_values_with_motor_forward():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.set_motor_speed(1, 2000)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] != 0.0
+
+    log.info(msg)
+
+    driver.motor_stop(1)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_move_pwm_servo():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.move_pwm_servo(1, 90)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_move_pwm_servo_boundary_angles():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.move_pwm_servo(1, 0)
+
+    time.sleep(1)
+
+    driver.move_pwm_servo(1, 90)
+
+    time.sleep(1)
+
+    driver.move_pwm_servo(1, 180)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_move_pwm_servo_multiple_servos():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.move_pwm_servo(1, 45)
+
+    time.sleep(1)
+
+    driver.move_pwm_servo(2, 135)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_get_imu_values_not_none():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    msg = driver.get_imu_values()
+
+    assert msg is not None
+
+    log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_get_imu_values_twice():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    msg1 = driver.get_imu_values()
+
+    assert msg1 is not None
+
+    log.info(msg1)
+
+    msg2 = driver.get_imu_values()
+
+    assert msg2 is not None
+
+    log.info(msg2)
+
+    time.sleep(1)
+
+    driver.close()
+
+
 def test_double_move_serial_servo():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
@@ -94,6 +209,194 @@ def test_double_move_serial_servo():
     assert msg is not None
 
     log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_get_battery_data_not_none():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    msg = driver.get_battery_data()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert len(values) == 2
+
+    log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_get_battery_data_twice():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    msg1 = driver.get_battery_data()
+
+    assert msg1 is not None
+
+    log.info(msg1)
+
+    msg2 = driver.get_battery_data()
+
+    assert msg2 is not None
+
+    log.info(msg2)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_pid_set_rpm():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_rpm(1, 100.0)
+
+    time.sleep(5)
+
+    driver.pid_motor_stop(1)
+
+    driver.close()
+
+
+def test_pid_set_rpm_with_encoder():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_rpm(1, 100.0)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] != 0.0
+
+    log.info(msg)
+
+    driver.pid_motor_stop(1)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_pid_motor_stop():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_rpm(1, 100.0)
+
+    time.sleep(2)
+
+    driver.pid_motor_stop(1)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] == pytest.approx(0.0, abs=5.0)
+
+    log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_pid_motor_stop_with_brake():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_rpm(1, 100.0)
+
+    time.sleep(2)
+
+    driver.pid_motor_stop(1, brake=1)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] == pytest.approx(0.0, abs=5.0)
+
+    log.info(msg)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_pid_set_gains():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
+
+    driver.pid_set_rpm(1, 100.0)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] != 0.0
+
+    log.info(msg)
+
+    driver.pid_motor_stop(1)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_pid_set_gains_multiple_motors():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
+    driver.pid_set_gains(2, kp=2.0, ki=0.2, kd=0.02)
+
+    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(2, 100.0)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] != 0.0
+    assert values[1] != 0.0
+
+    log.info(msg)
+
+    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(2)
 
     time.sleep(1)
 

@@ -91,7 +91,7 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def motor_stop(self, motor_id: int):
+    def motor_stop(self, motor_id: int, brake: int = 0):
         pass
 
     @abstractmethod
@@ -198,13 +198,13 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def motor_stop(self, motor_id: int):
+    def motor_stop(self, motor_id: int, brake: int = 0):
         try:
             payload = [
                 0x03,
                 0x02,
                 motor_id & 0xFF,
-                0x00,
+                brake & 0xFF,
             ]
 
             crc = _crc16_ccitt(payload)
@@ -422,7 +422,13 @@ class SerialDriver(Driver):
             self.messages.put(msg)
 
         if function == 0x04 and len(ext_data) == 20:
-            values = struct.unpack(">10h", bytes(ext_data[:20]))
+            raw = struct.unpack(">10h", bytes(ext_data[:20]))
+            values = (
+                raw[0] / 1000.0, raw[1] / 1000.0, raw[2] / 1000.0,  # accel (g)
+                raw[3] / 10.0,   raw[4] / 10.0,   raw[5] / 10.0,    # gyro (°/s)
+                float(raw[6]),   float(raw[7]),   float(raw[8]),      # mag (µT)
+                raw[9] / 100.0,                                        # temp (°C)
+            )
             msg = ImuResponse(values)
             self.messages.put(msg)
 
@@ -545,13 +551,13 @@ class CanbusDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e} -- {type(e)}")
 
-    def motor_stop(self, motor_id: int):
+    def motor_stop(self, motor_id: int, brake: int = 0):
         try:
             payload = [
                 0x03,
                 0x02,
                 motor_id & 0xFF,
-                0x00,
+                brake & 0xFF,
             ]
 
             crc = _crc16_ccitt(payload)
@@ -762,7 +768,13 @@ class CanbusDriver(Driver):
             self.messages.put(msg)
 
         if payload[1] == 0x04 and payload[2] == 20:
-            values = struct.unpack(">10h", bytes(payload[3:23]))
+            raw = struct.unpack(">10h", bytes(payload[3:23]))
+            values = (
+                raw[0] / 1000.0, raw[1] / 1000.0, raw[2] / 1000.0,  # accel (g)
+                raw[3] / 10.0,   raw[4] / 10.0,   raw[5] / 10.0,    # gyro (°/s)
+                float(raw[6]),   float(raw[7]),   float(raw[8]),      # mag (µT)
+                raw[9] / 100.0,                                        # temp (°C)
+            )
             msg = ImuResponse(values)
             self.messages.put(msg)
 

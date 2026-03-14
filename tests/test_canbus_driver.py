@@ -46,17 +46,17 @@ def test_double_ping():
     time.sleep(1)
 
     driver.close()
-    
-    
+
+
 def test_move_motor():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.set_motor_speed(1, 2000)
+    driver.set_motor_speed(0, 500)
 
     time.sleep(5)
-    
-    driver.motor_stop(1)
-    
+
+    driver.motor_stop(0)
+
     driver.close()
 
 
@@ -90,12 +90,12 @@ def test_get_encoder_values_not_none():
     driver.close()
 
 
-def test_get_encoder_values_with_motor_forward():
+def test_set_motor_speed_500_and_get_encoder_values():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.set_motor_speed(1, 2000)
+    driver.set_motor_speed(0, 500)
 
-    time.sleep(2)
+    time.sleep(5)
 
     msg = driver.get_encoder_values()
 
@@ -108,7 +108,9 @@ def test_get_encoder_values_with_motor_forward():
 
     log.info(msg)
 
-    driver.motor_stop(1)
+    time.sleep(2)
+
+    driver.motor_stop(0)
 
     time.sleep(1)
 
@@ -118,7 +120,7 @@ def test_get_encoder_values_with_motor_forward():
 def test_move_pwm_servo():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.move_pwm_servo(1, 90)
+    driver.move_pwm_servo(0, 90)
 
     time.sleep(1)
 
@@ -128,15 +130,15 @@ def test_move_pwm_servo():
 def test_move_pwm_servo_boundary_angles():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.move_pwm_servo(1, 0)
+    driver.move_pwm_servo(0, 0)
 
     time.sleep(1)
 
-    driver.move_pwm_servo(1, 90)
+    driver.move_pwm_servo(0, 90)
 
     time.sleep(1)
 
-    driver.move_pwm_servo(1, 180)
+    driver.move_pwm_servo(0, 180)
 
     time.sleep(1)
 
@@ -146,11 +148,11 @@ def test_move_pwm_servo_boundary_angles():
 def test_move_pwm_servo_multiple_servos():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.move_pwm_servo(1, 45)
+    driver.move_pwm_servo(0, 45)
 
     time.sleep(1)
 
-    driver.move_pwm_servo(2, 135)
+    driver.move_pwm_servo(3, 135)
 
     time.sleep(1)
 
@@ -254,14 +256,20 @@ def test_get_battery_data_twice():
     driver.close()
 
 
+def test_pid_set_gains():
+    driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
+
+    driver.pid_set_gains(0, kp=7.8049, ki=10.5174, kd=0.0)
+
+
 def test_pid_set_rpm():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 30.0)
 
     time.sleep(5)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     driver.close()
 
@@ -269,9 +277,9 @@ def test_pid_set_rpm():
 def test_pid_set_rpm_with_encoder():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 90.0)
 
-    time.sleep(2)
+    time.sleep(10)
 
     msg = driver.get_encoder_values()
 
@@ -284,7 +292,7 @@ def test_pid_set_rpm_with_encoder():
 
     log.info(msg)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(1)
 
@@ -294,11 +302,11 @@ def test_pid_set_rpm_with_encoder():
 def test_pid_motor_stop():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(2)
 
@@ -321,11 +329,11 @@ def test_pid_motor_stop():
 def test_pid_motor_stop_with_brake():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
-    driver.pid_motor_stop(1, brake=1)
+    driver.pid_motor_stop(0, brake=1)
 
     time.sleep(2)
 
@@ -345,14 +353,14 @@ def test_pid_motor_stop_with_brake():
     driver.close()
 
 
-def test_pid_set_gains():
+def test_pid_move_forward_with_gains():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
+    driver.pid_set_gains(0, kp=7.8049, ki=10.5174, kd=0.0)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 30.0)
 
-    time.sleep(2)
+    time.sleep(5)
 
     msg = driver.get_encoder_values()
 
@@ -365,7 +373,7 @@ def test_pid_set_gains():
 
     log.info(msg)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(1)
 
@@ -375,11 +383,11 @@ def test_pid_set_gains():
 def test_pid_set_gains_multiple_motors():
     driver = CanbusDriver(interface="slcan", channel=tty, bitrate=500000)
 
-    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
-    driver.pid_set_gains(2, kp=2.0, ki=0.2, kd=0.02)
+    driver.pid_set_gains(0, kp=7.8049, ki=10.5174, kd=0.0)
+    driver.pid_set_gains(1, kp=7.8049, ki=10.5174, kd=0.02)
 
+    driver.pid_set_rpm(0, 100.0)
     driver.pid_set_rpm(1, 100.0)
-    driver.pid_set_rpm(2, 100.0)
 
     time.sleep(2)
 
@@ -395,8 +403,8 @@ def test_pid_set_gains_multiple_motors():
 
     log.info(msg)
 
+    driver.pid_motor_stop(0)
     driver.pid_motor_stop(1)
-    driver.pid_motor_stop(2)
 
     time.sleep(1)
 

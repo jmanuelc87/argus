@@ -48,18 +48,18 @@ def test_double_ping():
 def test_set_motor_speed():
     driver = SerialDriver(tty, report=True)
 
-    driver.set_motor_speed(1, 2000)
+    driver.set_motor_speed(0, 2000)
 
     time.sleep(5)
 
-    driver.motor_stop(1)
+    driver.motor_stop(0)
 
     driver.close()
 
 
 def test_motor_stop():
     driver = SerialDriver(tty, report=True)
-    driver.motor_stop(2)
+    driver.motor_stop(1)
     time.sleep(1)
     driver.close()
 
@@ -97,7 +97,7 @@ def test_get_encoder_values_not_none():
 def test_get_encoder_values_with_motor_forward():
     driver = SerialDriver(tty, report=True)
 
-    driver.set_motor_speed(1, 2000)
+    driver.set_motor_speed(0, 2000)
 
     time.sleep(2)
 
@@ -112,7 +112,32 @@ def test_get_encoder_values_with_motor_forward():
 
     log.info(msg)
 
-    driver.motor_stop(1)
+    driver.motor_stop(0)
+
+    time.sleep(1)
+
+    driver.close()
+
+
+def test_set_motor_speed_500_and_get_encoder_values():
+    driver = SerialDriver(tty, report=True)
+
+    driver.set_motor_speed(0, 500)
+
+    time.sleep(2)
+
+    msg = driver.get_encoder_values()
+
+    assert msg is not None
+
+    values = msg.get_value()
+
+    assert isinstance(values, tuple)
+    assert values[0] != 0.0
+
+    log.info(msg)
+
+    driver.motor_stop(0)
 
     time.sleep(1)
 
@@ -261,11 +286,11 @@ def test_get_battery_data_twice():
 def test_pid_set_rpm():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(5)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     driver.close()
 
@@ -273,7 +298,7 @@ def test_pid_set_rpm():
 def test_pid_set_rpm_with_encoder():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
@@ -288,7 +313,7 @@ def test_pid_set_rpm_with_encoder():
 
     log.info(msg)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(1)
 
@@ -298,11 +323,11 @@ def test_pid_set_rpm_with_encoder():
 def test_pid_motor_stop():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(2)
 
@@ -325,11 +350,11 @@ def test_pid_motor_stop():
 def test_pid_motor_stop_with_brake():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
-    driver.pid_motor_stop(1, brake=1)
+    driver.pid_motor_stop(0, brake=1)
 
     time.sleep(2)
 
@@ -352,9 +377,9 @@ def test_pid_motor_stop_with_brake():
 def test_pid_set_gains():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
+    driver.pid_set_gains(0, kp=1.0, ki=0.1, kd=0.01)
 
-    driver.pid_set_rpm(1, 100.0)
+    driver.pid_set_rpm(0, 100.0)
 
     time.sleep(2)
 
@@ -369,7 +394,7 @@ def test_pid_set_gains():
 
     log.info(msg)
 
-    driver.pid_motor_stop(1)
+    driver.pid_motor_stop(0)
 
     time.sleep(1)
 
@@ -379,11 +404,11 @@ def test_pid_set_gains():
 def test_pid_set_gains_multiple_motors():
     driver = SerialDriver(tty, report=True)
 
-    driver.pid_set_gains(1, kp=1.0, ki=0.1, kd=0.01)
-    driver.pid_set_gains(2, kp=2.0, ki=0.2, kd=0.02)
+    driver.pid_set_gains(0, kp=1.0, ki=0.1, kd=0.01)
+    driver.pid_set_gains(1, kp=2.0, ki=0.2, kd=0.02)
 
+    driver.pid_set_rpm(0, 100.0)
     driver.pid_set_rpm(1, 100.0)
-    driver.pid_set_rpm(2, 100.0)
 
     time.sleep(2)
 
@@ -399,8 +424,8 @@ def test_pid_set_gains_multiple_motors():
 
     log.info(msg)
 
+    driver.pid_motor_stop(0)
     driver.pid_motor_stop(1)
-    driver.pid_motor_stop(2)
 
     time.sleep(1)
 

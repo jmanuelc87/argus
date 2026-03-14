@@ -1,6 +1,7 @@
 import can
 import sys
 import time
+import queue
 import threading
 
 from typing import Optional, Callable
@@ -14,8 +15,14 @@ class IsoTpReceiver:
     Flow-Control (CTS) is sent on fc_id.
 
     This mirrors many MCU demos that use two 11-bit IDs:
-      data_id = 0x700  (peer sends SF/FF/CF here)
+      data_id = 0x702  (peer sends SF/FF/CF here)
       fc_id   = 0x701  (we reply FC(CTS) here)
+
+    fc_dispatch_id / fc_dispatch_queue: when set, frames arriving on
+    fc_dispatch_id are forwarded into fc_dispatch_queue instead of being
+    discarded. A paired IsoTpSender sharing the same bus reads FC frames from
+    that queue, so both objects can coexist on a single can.Bus without racing
+    on bus.recv().
     """
 
     # PCI types
@@ -37,6 +44,8 @@ class IsoTpReceiver:
         on_message: Optional[Callable[[bytes], None]] = None,
         cf_timeout_s: float = 0.5,
         send_stmin_ms: int = 0,
+        fc_dispatch_id: Optional[int] = None,
+        fc_dispatch_queue: Optional[queue.Queue] = None,
     ):
         self.bus = bus
         self.data_id = rx_id
@@ -48,6 +57,9 @@ class IsoTpReceiver:
         self.send_stmin_ms = max(
             0, min(127, int(send_stmin_ms))
         )  # 0..127 ms per ISO-TP
+
+        self._fc_dispatch_id = fc_dispatch_id
+        self._fc_dispatch_queue = fc_dispatch_queue
 
         # Reassembly state
         self._lock = threading.Lock()
@@ -72,7 +84,7 @@ class IsoTpReceiver:
 
     def _handle_sf(self, frame: can.Message):
         sfl = frame.data[0] & 0x0F
-        if sfl > frame.dlc - 1:
+        if sfl == 0 or sfl > 7 or sfl > frame.dlc - 1:
             return
         payload = bytes(frame.data[1 : 1 + sfl])
         self.on_message(payload)
@@ -92,38 +104,25 @@ class IsoTpReceiver:
             self._next_sn = 1
             self._last_cf_time = time.monotonic()
 
-            if len(self._buf) >= self._expect_len:
-                payload = bytes(self._buf[: self._expect_len])
-                self._active = False
-                self._buf.clear()
-                # deliver outside lock
-                pass
-            else:
-                payload = None
-
-        if payload is not None:
-            self.on_message(payload)
-            return
-
         self._send_fc_cts()
 
     def _handle_cf(self, frame: can.Message):
-        if not self._active:
+        if frame.dlc < 2:
             return
         sn = frame.data[0] & 0x0F
 
         deliver_payload = None
         with self._lock:
-            # Timeout check between CFs
+            if not self._active:
+                return
+
             now = time.monotonic()
             if (now - self._last_cf_time) > self.cf_timeout_s:
-                # Abort reassembly
                 self._active = False
                 self._buf.clear()
                 return
 
             if sn != self._next_sn:
-                # Sequence error: abort
                 self._active = False
                 self._buf.clear()
                 return
@@ -151,26 +150,29 @@ class IsoTpReceiver:
             except Exception as e:
                 print(f"[ERR] CAN recv error: {e}", file=sys.stderr)
                 continue
-            if frame is None or frame.arbitration_id != self.data_id or frame.dlc == 0:
+            if frame is None or frame.dlc == 0:
                 continue
 
-            pci = frame.data[0] >> 4
-            if pci == self.PCI_SF:
-                self._handle_sf(frame)
-            elif pci == self.PCI_FF:
-                self._handle_ff(frame)
-            elif pci == self.PCI_CF:
-                self._handle_cf(frame)
-            else:
-                # Unknown / not used here
-                pass
+            if frame.arbitration_id == self.data_id:
+                pci = frame.data[0] >> 4
+                if pci == self.PCI_SF:
+                    self._handle_sf(frame)
+                elif pci == self.PCI_FF:
+                    self._handle_ff(frame)
+                elif pci == self.PCI_CF:
+                    self._handle_cf(frame)
+            elif (
+                self._fc_dispatch_id is not None
+                and frame.arbitration_id == self._fc_dispatch_id
+                and self._fc_dispatch_queue is not None
+            ):
+                # Forward FC frames to the paired sender instead of discarding them.
+                self._fc_dispatch_queue.put(frame)
 
-            # If we’re in the middle of a multi-frame but CFs stall, abort on timeout.
-            if self._active:
-                with self._lock:
-                    if (time.monotonic() - self._last_cf_time) > self.cf_timeout_s:
-                        self._active = False
-                        self._buf.clear()
+            with self._lock:
+                if self._active and (time.monotonic() - self._last_cf_time) > self.cf_timeout_s:
+                    self._active = False
+                    self._buf.clear()
 
     def start(self):
         if self._running:

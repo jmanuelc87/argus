@@ -27,6 +27,24 @@ def _crc16_ccitt(data, crc: int = 0xFFFF) -> int:
     return crc
 
 
+def _validate_bolt_frame(payload: bytes) -> bool:
+    """
+    Return True if payload is a structurally valid bolt frame:
+      [SOF=0xAA][TYPE:1][LEN:1][PAYLOAD:LEN][CRC16:2][EOF=0x55]
+    CRC16-CCITT is computed over TYPE + LEN + PAYLOAD.
+    """
+    if len(payload) < 6:
+        return False
+    if payload[0] != 0xAA or payload[-1] != 0x55:
+        return False
+    frame_len = payload[2]
+    if len(payload) != 3 + frame_len + 3:  # SOF+TYPE+LEN + payload + CRC16+EOF
+        return False
+    crc_computed = _crc16_ccitt(payload[1:-3])
+    crc_received = (payload[-3] << 8) | payload[-2]
+    return crc_computed == crc_received
+
+
 class Iter:
 
     @staticmethod
@@ -503,9 +521,20 @@ class CanbusDriver(Driver):
         try:
             self.canbus = self._make_canbus()
 
-            self.sender = IsoTpSender(self.canbus, tx_id=0x700, fc_id=0x701)
+            # Shared queue: receiver's _loop forwards 0x701 FC frames here so
+            # the sender can read them without racing on bus.recv().
+            _fc_queue: queue.Queue = queue.Queue()
+
+            self.sender = IsoTpSender(
+                self.canbus, tx_id=0x700, fc_id=0x701, fc_queue=_fc_queue
+            )
             self.receiver = IsoTpReceiver(
-                self.canbus, rx_id=0x702, fc_id=0x701, on_message=self.on_msg
+                self.canbus,
+                rx_id=0x702,
+                fc_id=0x701,
+                on_message=self.on_msg,
+                fc_dispatch_id=0x701,
+                fc_dispatch_queue=_fc_queue,
             )
 
             self.messages = queue.Queue()
@@ -745,30 +774,35 @@ class CanbusDriver(Driver):
         return None
 
     def on_msg(self, payload: bytes):
-        if payload[1] == 0x01:
-            len = payload[2]
-            msg = Response("".join(chr(h) for h in payload[3 : 3 + len]))
+        if not _validate_bolt_frame(payload):
+            self.__log.warning(f"Dropping invalid bolt frame: {payload.hex()}")
+            return
+
+        frame_type = payload[1]
+        frame_len = payload[2]
+        frame_data = payload[3 : 3 + frame_len]
+
+        if frame_type == 0x01:
+            msg = Response("".join(chr(h) for h in frame_data))
             self.messages.put(msg)
 
-        if payload[1] == 0x02 and payload[2] == 16:
+        elif frame_type == 0x02 and frame_len == 16:
             latest_rpm = [0.0] * 4
-            latest_rpm[0] = struct.unpack("<f", bytes(payload[3:7]))[0]
-            latest_rpm[1] = struct.unpack("<f", bytes(payload[7:11]))[0]
-            latest_rpm[2] = struct.unpack("<f", bytes(payload[11:15]))[0]
-            latest_rpm[3] = struct.unpack("<f", bytes(payload[15:19]))[0]
+            latest_rpm[0] = struct.unpack("<f", bytes(frame_data[0:4]))[0]
+            latest_rpm[1] = struct.unpack("<f", bytes(frame_data[4:8]))[0]
+            latest_rpm[2] = struct.unpack("<f", bytes(frame_data[8:12]))[0]
+            latest_rpm[3] = struct.unpack("<f", bytes(frame_data[12:16]))[0]
 
             msg = EncoderResponse(tuple(latest_rpm))
             self.messages.put(msg)
 
-        if payload[1] == 0x03:
-            angle = [0.0]
-            angle[0] = struct.unpack("<f", bytes(payload[3:7]))[0]
-
-            msg = ServoResponse(tuple(angle))
+        elif frame_type == 0x03 and frame_len == 4:
+            angle = struct.unpack("<f", bytes(frame_data[0:4]))[0]
+            msg = ServoResponse((angle,))
             self.messages.put(msg)
 
-        if payload[1] == 0x04 and payload[2] == 20:
-            raw = struct.unpack(">10h", bytes(payload[3:23]))
+        elif frame_type == 0x04 and frame_len == 20:
+            raw = struct.unpack(">10h", bytes(frame_data[0:20]))
             values = (
                 raw[0] / 1000.0, raw[1] / 1000.0, raw[2] / 1000.0,  # accel (g)
                 raw[3] / 10.0,   raw[4] / 10.0,   raw[5] / 10.0,    # gyro (°/s)
@@ -778,9 +812,9 @@ class CanbusDriver(Driver):
             msg = ImuResponse(values)
             self.messages.put(msg)
 
-        if payload[1] == 0x05 and payload[2] == 8:
-            voltage = struct.unpack("<f", bytes(payload[3:7]))[0]
-            percentage = struct.unpack("<f", bytes(payload[7:11]))[0]
+        elif frame_type == 0x05 and frame_len == 8:
+            voltage = struct.unpack("<f", bytes(frame_data[0:4]))[0]
+            percentage = struct.unpack("<f", bytes(frame_data[4:8]))[0]
             msg = BatteryResponse((voltage, percentage))
             self.messages.put(msg)
 

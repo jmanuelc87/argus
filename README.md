@@ -61,6 +61,14 @@ An abstract `Driver` base class defines the hardware interface (`ping`, `set_mot
 
 A minimal ISO-TP implementation supporting 11-bit CAN IDs. Handles Single Frames (≤7 bytes) and First/Consecutive Frames for larger payloads, with configurable STmin flow control delays. Thread-safe.
 
+## Scripts
+
+```python
+uv run python scripts/motor_experiment.py --driver canbus --tty
+  /dev/tty.usbmodem206B358043331 \                                                            
+      --pulses 300 900 600 1200 --duration 10 --output motor_data.csv
+```
+
 ## License
 
 See [LICENSE](LICENSE) for details.

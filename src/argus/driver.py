@@ -141,7 +141,9 @@ class Driver(ABC):
         pass
 
     @abstractmethod
-    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+    def pid_set_gains(
+        self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0
+    ):
         pass
 
     @abstractmethod
@@ -358,7 +360,9 @@ class SerialDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+    def pid_set_gains(
+        self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0
+    ):
         try:
             kp_bytes = list(struct.pack("<f", kp))
             ki_bytes = list(struct.pack("<f", ki))
@@ -442,10 +446,16 @@ class SerialDriver(Driver):
         if function == 0x04 and len(ext_data) == 20:
             raw = struct.unpack(">10h", bytes(ext_data[:20]))
             values = (
-                raw[0] / 1000.0, raw[1] / 1000.0, raw[2] / 1000.0,  # accel (g)
-                raw[3] / 10.0,   raw[4] / 10.0,   raw[5] / 10.0,    # gyro (°/s)
-                float(raw[6]),   float(raw[7]),   float(raw[8]),      # mag (µT)
-                raw[9] / 100.0,                                        # temp (°C)
+                raw[0] / 1000.0,
+                raw[1] / 1000.0,
+                raw[2] / 1000.0,  # accel (g)
+                raw[3] / 10.0,
+                raw[4] / 10.0,
+                raw[5] / 10.0,  # gyro (°/s)
+                float(raw[6]),
+                float(raw[7]),
+                float(raw[8]),  # mag (µT)
+                raw[9] / 100.0,  # temp (°C)
             )
             msg = ImuResponse(values)
             self.messages.put(msg)
@@ -730,7 +740,9 @@ class CanbusDriver(Driver):
         except Exception as e:
             self.__log.error(f"Ex: {e}")
 
-    def pid_set_gains(self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0):
+    def pid_set_gains(
+        self, motor_id: int, kp: float, ki: float, kd: float, save: int = 0
+    ):
         try:
             kp_bytes = list(struct.pack("<f", kp))
             ki_bytes = list(struct.pack("<f", ki))
@@ -804,10 +816,16 @@ class CanbusDriver(Driver):
         elif frame_type == 0x04 and frame_len == 20:
             raw = struct.unpack(">10h", bytes(frame_data[0:20]))
             values = (
-                raw[0] / 1000.0, raw[1] / 1000.0, raw[2] / 1000.0,  # accel (g)
-                raw[3] / 10.0,   raw[4] / 10.0,   raw[5] / 10.0,    # gyro (°/s)
-                float(raw[6]),   float(raw[7]),   float(raw[8]),      # mag (µT)
-                raw[9] / 100.0,                                        # temp (°C)
+                raw[0] / 1000.0,
+                raw[1] / 1000.0,
+                raw[2] / 1000.0,  # accel (g)
+                raw[3] / 10.0,
+                raw[4] / 10.0,
+                raw[5] / 10.0,  # gyro (°/s)
+                float(raw[6]),
+                float(raw[7]),
+                float(raw[8]),  # mag (µT)
+                raw[9] / 100.0,  # temp (°C)
             )
             msg = ImuResponse(values)
             self.messages.put(msg)

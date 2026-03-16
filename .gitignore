@@ -215,3 +215,7 @@ __marimo__/
 # Streamlit
 notebooks/
 .streamlit/secrets.toml
+
+
+# Custom folders
+models/
